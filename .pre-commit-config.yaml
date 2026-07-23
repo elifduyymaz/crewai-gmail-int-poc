@@ -1,0 +1,49 @@
+# Guardrails for the CrewAI Gmail-ingestion PoC (EFSP-329).
+# Install: uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+minimum_pre_commit_version: "3.5.0"
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: check-toml
+      - id: check-yaml
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check (project ruff via uv)
+        entry: uv run ruff check --fix
+        language: system
+        types: [python]
+        require_serial: true
+
+      - id: ruff-format
+        name: ruff format (project ruff via uv)
+        entry: uv run ruff format
+        language: system
+        types: [python]
+        require_serial: true
+
+      - id: no-crewai-in-core
+        name: no crewai import outside crew/
+        description: Core modules must stay framework-agnostic; crewai only under crew/.
+        entry: '(?m)^\s*(from|import)\s+crewai(\b|\.)'
+        language: pygrep
+        files: '^src/mail_ingestor/'
+        exclude: '^src/mail_ingestor/crew/'
+
+      - id: pytest-on-push
+        name: pytest (pre-push guardrail)
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

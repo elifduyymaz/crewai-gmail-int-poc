@@ -177,11 +177,7 @@ _CREW_DIR = _PACKAGE_ROOT / "crew"
 
 
 def _core_python_files() -> list[Path]:
-    return [
-        p
-        for p in _PACKAGE_ROOT.rglob("*.py")
-        if _CREW_DIR not in p.parents and p != _CREW_DIR
-    ]
+    return [p for p in _PACKAGE_ROOT.rglob("*.py") if _CREW_DIR not in p.parents and p != _CREW_DIR]
 
 
 def test_no_crewai_import_in_core() -> None:
@@ -191,8 +187,7 @@ def test_no_crewai_import_in_core() -> None:
         if _CREWAI_IMPORT.search(p.read_text(encoding="utf-8"))
     ]
     assert not offenders, (
-        "crewai imported in framework-agnostic core (allowed only under crew/): "
-        f"{offenders}"
+        f"crewai imported in framework-agnostic core (allowed only under crew/): {offenders}"
     )
 
 
