@@ -1,7 +1,7 @@
 [project]
 name = "mail-ingestor"
 version = "0.1.0"
-description = "Add your description here"
+description = "Framework-agnostic Gmail-ingestion PoC core for the CrewAI framework-selection spike."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
