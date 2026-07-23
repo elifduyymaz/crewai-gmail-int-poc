@@ -2,7 +2,7 @@ import subprocess
 import sys
 
 import mail_ingestor
-from mail_ingestor.main import build_parser, main
+from mail_ingestor.main import build_parser
 
 
 def test_version_is_set():
@@ -21,6 +21,7 @@ def test_main_help_exits_zero():
         [sys.executable, "-m", "mail_ingestor.main", "--help"],
         capture_output=True,
         text=True,
+        check=False,
     )
     assert result.returncode == 0
     assert "usage" in result.stdout.lower()

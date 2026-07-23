@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual env
+.venv/
+
+# Secrets / credentials
+.env
+credentials.json
+token.json
+
+# Local data
+*.db
+*.sqlite3
