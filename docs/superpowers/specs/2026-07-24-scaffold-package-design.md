@@ -78,13 +78,15 @@ All versions are locked in `uv.lock` (committed). Exact-version resolution comes
 lockfile; the `pyproject.toml` constraints above are the declared minimums, and `uv.lock`
 freezes the concrete versions for reproducibility.
 
-### LiteLLM note (flagged, not solved)
+### LiteLLM note (PoC finding — updated at Task 2)
 
-CrewAI depends on `litellm` transitively, and CrewAI's own LLM abstraction routes through
-it. The PRD's "no LiteLLM" constraint means our *LLM call path* uses the `anthropic` SDK
-directly — it does **not** mean stripping the transitive dependency. This tension is
-documented here and in the README so it is a lived, explicit decision rather than a
-silent surprise in a later task.
+The plan originally assumed CrewAI pulls in `litellm` transitively. **The pinned build
+does not.** Task 2's `uv.lock` (crewai 1.15.1 on Python 3.11, 157 packages) contains **no
+`litellm` entry** — CrewAI's resolved tree uses `openai`, `instructor`, and `mcp` instead.
+This was independently verified against the lockfile. So the PRD's "no LiteLLM" constraint
+is satisfied by construction here, not by discipline: there is nothing to strip. Our LLM
+call path will still use the `anthropic` SDK directly. This is a genuine framework-behavior
+finding for the PoC assessment (CrewAI 1.15.x no longer bundles litellm).
 
 ## Toolchain Setup Steps
 
