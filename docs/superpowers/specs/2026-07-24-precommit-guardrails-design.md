@@ -29,7 +29,10 @@ Pinned hook revisions (pre-commit best practice). Hooks:
    `trailing-whitespace`, `end-of-file-fixer`, `check-added-large-files`,
    `check-merge-conflict`, `check-toml`, `check-yaml`, `check-case-conflict`,
    `detect-private-key`.
-2. **`astral-sh/ruff-pre-commit`** — `ruff` (lint, `--fix`) and `ruff-format`.
+2. **ruff** — `ruff` (lint, `--fix`) and `ruff-format`. (Implementation note: the plan
+   overrides this to LOCAL hooks invoking the project's pinned ruff via `uv run ruff`,
+   rather than the `astral-sh/ruff-pre-commit` repo, to keep hook/CI/manual version parity.
+   This is what shipped.)
 3. **`gitleaks/gitleaks`** — `gitleaks` secret/entropy scan over the diff.
 4. **Local `no-crewai-in-core`** — the discipline hook:
    - `language: pygrep`

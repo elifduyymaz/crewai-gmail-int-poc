@@ -42,6 +42,7 @@ repos:
         description: Core modules must stay framework-agnostic; crewai only under crew/.
         entry: '(?m)^\s*(from|import)\s+crewai(\b|\.)'
         language: pygrep
+        types: [python]
         files: '^src/mail_ingestor/'
         exclude: '^src/mail_ingestor/crew/'
 
