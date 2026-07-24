@@ -12,6 +12,7 @@ remain technically mutable, which is acceptable for this PoC.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from enum import Enum
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -64,3 +65,21 @@ class SummaryRecord(_StrictModel):
     summary: Summary
     model: str = Field(min_length=1)
     created_at: AwareDatetime = Field(default_factory=_utcnow)
+
+
+class ProcessingStage(str, Enum):
+    """Pipeline stage where processing of a message can fail."""
+
+    READ = "read"
+    PARSE = "parse"
+    SUMMARIZE = "summarize"
+    PERSIST = "persist"
+
+
+class DeadLetterRecord(_StrictModel):
+    """Failure boundary: a message that could not be processed."""
+
+    source_message_id: str | None = None
+    stage: ProcessingStage
+    error: str = Field(min_length=1)
+    failed_at: AwareDatetime = Field(default_factory=_utcnow)

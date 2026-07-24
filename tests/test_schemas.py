@@ -3,7 +3,13 @@ from datetime import UTC, datetime
 import pytest
 from pydantic import ValidationError
 
-from mail_ingestor.schemas import EmailMessage, Summary, SummaryRecord
+from mail_ingestor.schemas import (
+    DeadLetterRecord,
+    EmailMessage,
+    ProcessingStage,
+    Summary,
+    SummaryRecord,
+)
 
 AWARE = datetime(2026, 7, 24, 12, 0, tzinfo=UTC)
 
@@ -129,3 +135,37 @@ def test_summary_record_json_round_trip():
 def test_summary_record_no_protected_namespace_warning(recwarn):
     SummaryRecord(source_message_id="m1", summary=_summary(), model="m")
     assert not [w for w in recwarn.list if "protected namespace" in str(w.message).lower()]
+
+
+# --- ProcessingStage + DeadLetterRecord ---
+
+
+def test_processing_stage_values():
+    assert {s.value for s in ProcessingStage} == {"read", "parse", "summarize", "persist"}
+
+
+def test_dead_letter_valid_with_enum():
+    d = DeadLetterRecord(stage=ProcessingStage.PARSE, error="boom")
+    assert d.stage is ProcessingStage.PARSE
+    assert d.source_message_id is None
+    assert d.failed_at.tzinfo is not None
+
+
+def test_dead_letter_accepts_stage_string():
+    d = DeadLetterRecord(stage="summarize", error="x")
+    assert d.stage is ProcessingStage.SUMMARIZE
+
+
+def test_dead_letter_rejects_unknown_stage():
+    with pytest.raises(ValidationError):
+        DeadLetterRecord(stage="unknown", error="x")
+
+
+def test_dead_letter_requires_nonempty_error():
+    with pytest.raises(ValidationError):
+        DeadLetterRecord(stage=ProcessingStage.READ, error="")
+
+
+def test_dead_letter_json_round_trip():
+    d = DeadLetterRecord(source_message_id="m1", stage=ProcessingStage.PERSIST, error="db down")
+    assert DeadLetterRecord.model_validate_json(d.model_dump_json()) == d
