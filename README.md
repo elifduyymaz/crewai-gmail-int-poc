@@ -18,6 +18,25 @@ uv run python -m mail_ingestor.main --help
 
 Copy `.env.example` to `.env` and fill in values when logic tasks begin.
 
+## Pre-commit guardrails
+
+Install the hooks once (covers both commit and push stages):
+
+```bash
+uv run pre-commit install --hook-type pre-commit --hook-type pre-push
+```
+
+On every commit: whitespace/EOF/large-file/merge-conflict hygiene, `detect-private-key`,
+`gitleaks` secret scan, `ruff` lint (`--fix`) + `ruff format`, and `no-crewai-in-core`
+(blocks a `crewai` import anywhere under `src/mail_ingestor/` except `crew/`). On every
+push: the full `pytest` suite must pass.
+
+Run all hooks manually against the whole repo:
+
+```bash
+uv run pre-commit run --all-files
+```
+
 ## Layout
 
 - `src/mail_ingestor/gmail/` — Gmail reader (core, framework-agnostic)
