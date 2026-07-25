@@ -169,3 +169,30 @@ def test_dead_letter_requires_nonempty_error():
 def test_dead_letter_json_round_trip():
     d = DeadLetterRecord(source_message_id="m1", stage=ProcessingStage.PERSIST, error="db down")
     assert DeadLetterRecord.model_validate_json(d.model_dump_json()) == d
+
+
+# --- Additional boundary coverage (final-review nits) ---
+
+
+def test_email_message_requires_received_at():
+    with pytest.raises(ValidationError):
+        EmailMessage(message_id="m1", sender="a@example.com")
+
+
+def test_summary_record_rejects_naive_created_at():
+    with pytest.raises(ValidationError):
+        SummaryRecord(
+            source_message_id="m1",
+            summary=_summary(),
+            model="m",
+            created_at=datetime(2026, 7, 24, 12, 0),  # noqa: DTZ001
+        )
+
+
+def test_dead_letter_rejects_naive_failed_at():
+    with pytest.raises(ValidationError):
+        DeadLetterRecord(
+            stage=ProcessingStage.READ,
+            error="x",
+            failed_at=datetime(2026, 7, 24, 12, 0),  # noqa: DTZ001
+        )

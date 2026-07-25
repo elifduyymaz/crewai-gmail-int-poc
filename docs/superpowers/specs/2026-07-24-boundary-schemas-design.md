@@ -38,7 +38,7 @@ Gmail label → [EmailMessage] → summarizer(LLM) → [Summary] → +provenance
 
 ```python
 class _StrictModel(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
+    model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
 ```
 
 ## Schemas
