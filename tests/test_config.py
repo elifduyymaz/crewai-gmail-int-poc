@@ -32,7 +32,7 @@ def test_from_env_missing_key_raises(monkeypatch):
 
 def test_from_env_blank_key_raises(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "   ")
-    with pytest.raises(MissingSettingError):
+    with pytest.raises(MissingSettingError, match="ANTHROPIC_API_KEY"):
         Settings.from_env(load_dotenv_file=False)
 
 
