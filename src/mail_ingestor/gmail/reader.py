@@ -25,6 +25,8 @@ class GmailReaderService:
 
     def list_message_ids(self, label_id: str, *, max_results: int | None = None) -> list[str]:
         """List message IDs under ``label_id``, paginating up to ``max_results`` (all if None)."""
+        if max_results is not None and max_results <= 0:
+            return []
         message_ids: list[str] = []
         page_token: str | None = None
         try:

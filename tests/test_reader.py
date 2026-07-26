@@ -47,6 +47,12 @@ def test_list_empty_label():
     assert GmailReaderService(service).list_message_ids("Label_1") == []
 
 
+def test_list_max_results_zero_returns_empty_without_api_call():
+    service = _service_list([{"messages": [{"id": "m1"}]}])
+    assert GmailReaderService(service).list_message_ids("Label_1", max_results=0) == []
+    _list_execute(service).assert_not_called()
+
+
 def test_list_respects_max_results():
     service = _service_list(
         [{"messages": [{"id": "m1"}, {"id": "m2"}, {"id": "m3"}], "nextPageToken": "t1"}]
