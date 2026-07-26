@@ -24,3 +24,6 @@ token.json
 .idea/
 .vscode/
 *.swp
+
+# Process docs (specs/plans) — kept local, not committed
+docs/superpowers/
