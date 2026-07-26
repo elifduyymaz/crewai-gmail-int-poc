@@ -76,6 +76,22 @@ def test_load_saved_none_when_expired_no_refresh(tmp_path, monkeypatch):
     assert load_saved_credentials(cfg) is None
 
 
+def test_load_saved_returns_none_when_refresh_fails(tmp_path, monkeypatch):
+    from google.auth.exceptions import RefreshError
+
+    cfg = _config(tmp_path)
+    cfg.token_path.write_text('{"orig": 1}', encoding="utf-8")
+    fake = MagicMock(valid=False, expired=True, refresh_token="r")
+    fake.refresh.side_effect = RefreshError("token expired")
+    monkeypatch.setattr(
+        auth, "Credentials", MagicMock(from_authorized_user_file=MagicMock(return_value=fake))
+    )
+    monkeypatch.setattr(auth, "Request", MagicMock())
+    assert load_saved_credentials(cfg) is None
+    # a failed refresh must not overwrite the existing token file
+    assert cfg.token_path.read_text(encoding="utf-8") == '{"orig": 1}'
+
+
 def test_run_flow_missing_credentials_raises(tmp_path):
     with pytest.raises(GmailAuthError, match="OAuth client file not found"):
         run_installed_app_flow(_config(tmp_path))

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+from google.auth.exceptions import RefreshError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -43,8 +44,10 @@ class GmailAuthConfig:
 
 
 def _save_credentials(creds: Credentials, token_path: Path) -> None:
-    """Persist credentials to ``token_path`` with owner-only (0600) permissions."""
-    token_path.write_text(creds.to_json(), encoding="utf-8")
+    """Persist credentials to ``token_path``, created with owner-only (0600) permissions."""
+    fd = os.open(token_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(creds.to_json())
     token_path.chmod(0o600)
 
 
@@ -56,7 +59,10 @@ def load_saved_credentials(config: GmailAuthConfig) -> Credentials | None:
     if creds.valid:
         return creds
     if creds.expired and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except RefreshError:
+            return None
         _save_credentials(creds, config.token_path)
         return creds
     return None

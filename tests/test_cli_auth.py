@@ -10,6 +10,7 @@ def test_cli_auth_success(monkeypatch, capsys):
     rc = main_mod.main(["auth"])
     assert rc == 0
     assert "auth ok" in capsys.readouterr().out.lower()
+    main_mod.ensure_credentials.assert_called_once()
 
 
 def test_cli_auth_failure_returns_1(monkeypatch, capsys):
