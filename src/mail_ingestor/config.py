@@ -3,6 +3,10 @@
 Framework-agnostic core — a plain stdlib dataclass with no framework coupling.
 Only the LLM settings are defined here; Gmail and persistence settings land with
 the tasks that consume them.
+
+Authentication uses a Claude OAuth/seed token (``ANTHROPIC_AUTH_TOKEN``), NOT a
+static ``ANTHROPIC_API_KEY``. The token is handed to the Anthropic SDK as
+``auth_token`` by the code that constructs the client.
 """
 
 from __future__ import annotations
@@ -23,27 +27,27 @@ class MissingSettingError(RuntimeError):
 class Settings:
     """Immutable application settings.
 
-    ``anthropic_api_key`` is excluded from ``repr`` so the secret never leaks into
-    logs or tracebacks.
+    ``anthropic_auth_token`` (a Claude OAuth/seed token) is excluded from ``repr``
+    so the secret never leaks into logs or tracebacks.
     """
 
-    anthropic_api_key: str = field(repr=False)
+    anthropic_auth_token: str = field(repr=False)
     llm_model: str = DEFAULT_LLM_MODEL
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> Settings:
         """Build ``Settings`` from environment variables.
 
-        Loads a local ``.env`` first (unless ``load_dotenv_file`` is False), then reads
-        ``ANTHROPIC_API_KEY`` (required) and ``LLM_MODEL`` (optional, defaults to
-        ``DEFAULT_LLM_MODEL``).
+        Reads ``ANTHROPIC_AUTH_TOKEN`` (required — a Claude OAuth/seed token) and
+        ``LLM_MODEL`` (optional, defaults to ``DEFAULT_LLM_MODEL``). This project does
+        not use ``ANTHROPIC_API_KEY``.
         """
         if load_dotenv_file:
             load_dotenv()
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-        if not api_key:
+        auth_token = os.environ.get("ANTHROPIC_AUTH_TOKEN", "").strip()
+        if not auth_token:
             raise MissingSettingError(
-                "ANTHROPIC_API_KEY is required but is unset or blank (see .env.example)."
+                "ANTHROPIC_AUTH_TOKEN is required but is unset or blank (see .env.example)."
             )
         llm_model = os.environ.get("LLM_MODEL", "").strip() or DEFAULT_LLM_MODEL
-        return cls(anthropic_api_key=api_key, llm_model=llm_model)
+        return cls(anthropic_auth_token=auth_token, llm_model=llm_model)
