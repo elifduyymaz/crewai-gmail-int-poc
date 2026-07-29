@@ -33,7 +33,7 @@ def test_get_llm_client_uses_auth_token_not_api_key(monkeypatch: pytest.MonkeyPa
 
 
 def test_missing_auth_token_propagates(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "")
     with pytest.raises(MissingSettingError, match="ANTHROPIC_AUTH_TOKEN"):
         get_llm_client()
 
