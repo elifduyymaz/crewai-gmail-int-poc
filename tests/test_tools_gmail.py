@@ -4,10 +4,16 @@ from unittest.mock import MagicMock
 
 import pytest
 from crewai.tools import BaseTool
+from pydantic import ValidationError
 
 from mail_ingestor.gmail.labels import LabelNotFoundError, LabelResolver
 from mail_ingestor.gmail.reader import GmailReaderError, GmailReaderService
-from mail_ingestor.tools.gmail_tool import GmailGetMessageTool, GmailListByLabelTool
+from mail_ingestor.tools.gmail_tool import (
+    GetMessageArgs,
+    GmailGetMessageTool,
+    GmailListByLabelTool,
+    ListByLabelArgs,
+)
 
 
 def test_list_by_label_resolves_then_lists() -> None:
@@ -82,3 +88,51 @@ def test_tools_expose_name_and_description() -> None:
 def test_tools_are_basetool_subclasses() -> None:
     assert issubclass(GmailListByLabelTool, BaseTool)
     assert issubclass(GmailGetMessageTool, BaseTool)
+
+
+def test_tools_default_env_vars_to_empty_list() -> None:
+    reader = MagicMock(spec=GmailReaderService)
+    resolver = MagicMock(spec=LabelResolver)
+    list_tool = GmailListByLabelTool(reader=reader, resolver=resolver)
+    get_tool = GmailGetMessageTool(reader=reader)
+
+    assert list_tool.env_vars == []
+    assert get_tool.env_vars == []
+
+
+def test_list_by_label_args_reject_non_positive_limit() -> None:
+    with pytest.raises(ValidationError):
+        ListByLabelArgs(label_name="INBOX", limit=0)
+    with pytest.raises(ValidationError):
+        ListByLabelArgs(label_name="INBOX", limit=-1)
+
+
+def test_list_by_label_args_require_label_name() -> None:
+    with pytest.raises(ValidationError):
+        ListByLabelArgs(limit=5)  # type: ignore[call-arg]
+
+
+def test_get_message_args_reject_empty_message_id() -> None:
+    with pytest.raises(ValidationError):
+        GetMessageArgs(message_id="")
+
+
+def test_list_tool_run_validates_via_args_schema() -> None:
+    """`tool.run(...)` (public entry) must reject invalid inputs before hitting _run."""
+    reader = MagicMock(spec=GmailReaderService)
+    resolver = MagicMock(spec=LabelResolver)
+    tool = GmailListByLabelTool(reader=reader, resolver=resolver)
+
+    with pytest.raises(ValueError, match="validation failed"):
+        tool.run(label_name="INBOX", limit=-1)
+    resolver.resolve.assert_not_called()
+    reader.list_message_ids.assert_not_called()
+
+
+def test_get_tool_run_validates_via_args_schema() -> None:
+    reader = MagicMock(spec=GmailReaderService)
+    tool = GmailGetMessageTool(reader=reader)
+
+    with pytest.raises(ValueError, match="validation failed"):
+        tool.run(message_id="")
+    reader.get_message.assert_not_called()
