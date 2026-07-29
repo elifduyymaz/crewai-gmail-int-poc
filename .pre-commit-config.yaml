@@ -38,13 +38,16 @@ repos:
         require_serial: true
 
       - id: no-crewai-in-core
-        name: no crewai import outside crew/
-        description: Core modules must stay framework-agnostic; crewai only under crew/.
+        name: no crewai import outside the 2-file fence
+        description: >-
+          Core modules must stay framework-agnostic; crewai may be imported only
+          under crew/ and in tools/gmail_tool.py (the 2 files allowed to bind
+          the framework — see architecture.md § Provider abstraction).
         entry: '(?m)^\s*(from|import)\s+crewai(\b|\.)'
         language: pygrep
         types: [python]
         files: '^src/mail_ingestor/'
-        exclude: '^src/mail_ingestor/crew/'
+        exclude: '^src/mail_ingestor/(?:crew/|tools/gmail_tool\.py$)'
 
       - id: pytest-on-push
         name: pytest (pre-push guardrail)
