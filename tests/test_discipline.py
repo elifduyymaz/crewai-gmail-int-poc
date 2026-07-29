@@ -1,8 +1,12 @@
-"""Framework-agnostic discipline: crewai must not leak into core modules, and
-the native LLM SDK must live only in ``llm.py`` (NFR-I2 provider abstraction).
+"""Framework-agnostic discipline invariants:
 
-Mirrors the ``no-crewai-in-core`` pre-commit hook so the invariant is enforced
-in CI even when pre-commit is not installed.
+  1. ``crewai`` imports live only inside the 2-file fence (``crew/`` and
+     ``tools/gmail_tool.py``).
+  2. The native LLM SDK (``anthropic``) is imported only in ``llm.py`` — the
+     sole provider-abstraction point (NFR-I2).
+
+Mirrors the ``no-crewai-in-core`` pre-commit hook so both invariants are
+enforced in CI even when pre-commit is not installed.
 """
 
 from __future__ import annotations
@@ -16,10 +20,15 @@ _ANTHROPIC_IMPORT = re.compile(r"^\s*(?:from|import)\s+anthropic(?:\b|\.)", re.M
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "src" / "mail_ingestor"
 _CREW_DIR = _PACKAGE_ROOT / "crew"
 _LLM_MODULE = _PACKAGE_ROOT / "llm.py"
+_FENCE_FILES: frozenset[Path] = frozenset({_PACKAGE_ROOT / "tools" / "gmail_tool.py"})
+
+
+def _is_fenced(path: Path) -> bool:
+    return _CREW_DIR in path.parents or path == _CREW_DIR or path in _FENCE_FILES
 
 
 def _core_python_files() -> list[Path]:
-    return [p for p in _PACKAGE_ROOT.rglob("*.py") if _CREW_DIR not in p.parents and p != _CREW_DIR]
+    return [p for p in _PACKAGE_ROOT.rglob("*.py") if not _is_fenced(p)]
 
 
 def test_no_crewai_import_in_core() -> None:
@@ -29,7 +38,7 @@ def test_no_crewai_import_in_core() -> None:
         if _CREWAI_IMPORT.search(p.read_text(encoding="utf-8"))
     ]
     assert not offenders, (
-        f"crewai imported in framework-agnostic core (allowed only under crew/): {offenders}"
+        f"crewai imported outside the 2-file fence (crew/ + tools/gmail_tool.py): {offenders}"
     )
 
 
