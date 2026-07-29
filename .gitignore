@@ -27,3 +27,6 @@ token.json
 
 # Process docs (specs/plans) — kept local, not committed
 docs/superpowers/
+
+# Local dev scripts (verification, ad-hoc probes) — not part of the product
+scripts/

@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
-DEFAULT_LLM_MODEL = "claude-sonnet-5"
+DEFAULT_LLM_MODEL = "claude-haiku-4-5-20251001"
 
 
 class MissingSettingError(RuntimeError):

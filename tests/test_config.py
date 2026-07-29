@@ -6,7 +6,7 @@ from mail_ingestor.config import DEFAULT_LLM_MODEL, MissingSettingError, Setting
 
 
 def test_default_llm_model_constant():
-    assert DEFAULT_LLM_MODEL == "claude-sonnet-5"
+    assert DEFAULT_LLM_MODEL == "claude-haiku-4-5-20251001"
 
 
 def test_from_env_uses_default_model(monkeypatch):
@@ -14,7 +14,7 @@ def test_from_env_uses_default_model(monkeypatch):
     monkeypatch.delenv("LLM_MODEL", raising=False)
     settings = Settings.from_env(load_dotenv_file=False)
     assert settings.anthropic_auth_token == "tok-test-123"
-    assert settings.llm_model == "claude-sonnet-5"
+    assert settings.llm_model == "claude-haiku-4-5-20251001"
 
 
 def test_from_env_honors_llm_model_override(monkeypatch):
