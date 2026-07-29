@@ -10,16 +10,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from crewai.tools import BaseTool
+from crewai.tools import BaseTool, EnvVar
 from pydantic import BaseModel, Field
 
 from mail_ingestor.gmail.labels import LabelResolver
 from mail_ingestor.gmail.reader import GmailReaderService
 
 
-class _ListByLabelArgs(BaseModel):
+class ListByLabelArgs(BaseModel):
     label_name: str = Field(..., description="Gmail label name (e.g. 'INBOX') to list from.")
-    limit: int = Field(..., description="Maximum number of message ids to return.")
+    limit: int = Field(..., ge=1, description="Maximum number of message ids to return.")
 
 
 class GmailListByLabelTool(BaseTool):
@@ -28,8 +28,8 @@ class GmailListByLabelTool(BaseTool):
         "List Gmail message ids under a given label name, capped at `limit`. "
         "Resolves the label name to an id via the injected LabelResolver."
     )
-    args_schema: type[BaseModel] = _ListByLabelArgs
-    env_vars: list[Any] = Field(default_factory=list)
+    args_schema: type[BaseModel] = ListByLabelArgs
+    env_vars: list[EnvVar] = Field(default_factory=list)
     reader: GmailReaderService
     resolver: LabelResolver
 
@@ -38,8 +38,10 @@ class GmailListByLabelTool(BaseTool):
         return self.reader.list_message_ids(label_id, max_results=limit)
 
 
-class _GetMessageArgs(BaseModel):
-    message_id: str = Field(..., description="Gmail message id, as returned by the list tool.")
+class GetMessageArgs(BaseModel):
+    message_id: str = Field(
+        ..., min_length=1, description="Gmail message id, as returned by the list tool."
+    )
 
 
 class GmailGetMessageTool(BaseTool):
@@ -49,8 +51,8 @@ class GmailGetMessageTool(BaseTool):
         "(format=full, with payload headers and parts). MIME parsing is a "
         "separate downstream step, not this tool's responsibility."
     )
-    args_schema: type[BaseModel] = _GetMessageArgs
-    env_vars: list[Any] = Field(default_factory=list)
+    args_schema: type[BaseModel] = GetMessageArgs
+    env_vars: list[EnvVar] = Field(default_factory=list)
     reader: GmailReaderService
 
     def _run(self, message_id: str) -> dict[str, Any]:
