@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual env
+.venv/
+
+# Secrets / credentials
+.env
+credentials.json
+token.json
+
+# Local data
+*.db
+*.sqlite3
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Process docs (specs/plans) — kept local, not committed
+docs/superpowers/
