@@ -12,9 +12,11 @@ from mail_ingestor.flow import (
     IngestState,
     MailIngestorFlow,
     NativeAnthropicLLM,
+    SummaryValidationError,
     ToolUseNotSupported,
     _content_as_text,
     _to_anthropic_messages,
+    _truncate,
     build_summarize_task,
     build_summarizer_agent,
 )
@@ -314,6 +316,82 @@ def test_flow_parse_produces_email_message(monkeypatch: pytest.MonkeyPatch) -> N
     assert parsed.sender == "alice@example.com"
     assert parsed.subject == "Hi"
     assert parsed.body_text.strip() == "hello"
+
+
+# ---------- _truncate helper ----------
+
+
+def test_truncate_returns_none_for_none() -> None:
+    assert _truncate(None, 10) is None
+
+
+def test_truncate_passes_short_text_through() -> None:
+    assert _truncate("short", 10) == "short"
+
+
+def test_truncate_appends_ellipsis_when_over_limit() -> None:
+    assert _truncate("abcdefghijk", 5) == "abcde..."
+
+
+# ---------- summarize failure paths ----------
+
+
+def test_summarize_raises_when_llm_output_does_not_validate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When Crew exhausts max_iter, `.pydantic` is None; the flow must surface
+    a distinct exception carrying the raw LLM text for the DLQ record."""
+    _seed_token(monkeypatch)
+    fake_result = MagicMock(pydantic=None, raw="not-valid-json{...")
+
+    def fake_crew_ctor(*_args: object, **_kwargs: object) -> MagicMock:
+        instance = MagicMock()
+        instance.kickoff.return_value = fake_result
+        return instance
+
+    monkeypatch.setattr("mail_ingestor.flow.Crew", fake_crew_ctor)
+
+    reader = MagicMock(spec=GmailReaderService)
+    flow = MailIngestorFlow(reader=reader, model="c")
+    parsed = EmailMessage(
+        message_id="m1",
+        sender="a@x.com",
+        received_at=datetime(2026, 7, 30, 12, 0, tzinfo=UTC),
+        subject="Test",
+        body_text="hello",
+    )
+
+    with pytest.raises(SummaryValidationError, match="not-valid-json"):
+        flow.summarize(parsed)
+
+
+def test_summarize_error_truncates_long_raw_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Long LLM raw outputs are clipped in the error message so DLQ records
+    do not carry unbounded prompts back through logging."""
+    _seed_token(monkeypatch)
+    long_raw = "x" * 500
+    fake_result = MagicMock(pydantic=None, raw=long_raw)
+
+    def fake_crew_ctor(*_args: object, **_kwargs: object) -> MagicMock:
+        instance = MagicMock()
+        instance.kickoff.return_value = fake_result
+        return instance
+
+    monkeypatch.setattr("mail_ingestor.flow.Crew", fake_crew_ctor)
+
+    reader = MagicMock(spec=GmailReaderService)
+    flow = MailIngestorFlow(reader=reader, model="c")
+    parsed = EmailMessage(
+        message_id="m1",
+        sender="a@x.com",
+        received_at=datetime(2026, 7, 30, 12, 0, tzinfo=UTC),
+    )
+
+    with pytest.raises(SummaryValidationError) as excinfo:
+        flow.summarize(parsed)
+    message = str(excinfo.value)
+    assert "..." in message
+    assert message.count("x") <= 220  # 200 chars + minor overhead
 
 
 # ---------- End-to-end kickoff (the Task 3.3 checkpoint) ----------

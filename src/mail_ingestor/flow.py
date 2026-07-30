@@ -53,6 +53,14 @@ _SUMMARIZER_BACKSTORY = (
     "faithful summary. You never invent facts absent from the source and "
     "you emit exactly the JSON schema requested."
 )
+_RAW_SNIPPET_MAX_CHARS = 200
+
+
+def _truncate(text: str | None, limit: int) -> str | None:
+    """Truncate ``text`` for embedding in error messages; passes ``None`` through."""
+    if text is None:
+        return None
+    return text if len(text) <= limit else text[:limit] + "..."
 
 
 def _content_as_text(content: str | list[dict[str, Any]] | None) -> str:
@@ -118,6 +126,17 @@ class EmptyLLMResponse(RuntimeError):
     up entirely of non-text blocks such as ``tool_use``. Losing this
     signal to a caller-side JSON-validation error would obscure the real
     root cause when the flow's summarize step DLQs the message.
+    """
+
+
+class SummaryValidationError(RuntimeError):
+    """Raised when the LLM output could not be validated as ``Summary``.
+
+    CrewAI retries an ``output_pydantic`` validation failure internally
+    up to ``Agent.max_iter``; if it exhausts the budget or is stopped by
+    ``max_execution_time``, ``CrewOutput.pydantic`` is ``None``. The
+    exception carries a truncated snippet of the raw LLM output so the
+    DLQ record has enough context to reproduce the failure.
     """
 
 
@@ -294,9 +313,13 @@ class MailIngestorFlow(Flow[IngestState]):
         result = crew.kickoff()
         summary = getattr(result, "pydantic", None)
         if not isinstance(summary, Summary):
-            raise RuntimeError(  # noqa: TRY004  — runtime state failure, not user-input type error
-                "Crew produced no Summary — the LLM output did not validate "
-                "against output_pydantic within Agent.max_iter."
+            raw = getattr(result, "raw", None)
+            raw_snippet = _truncate(raw, _RAW_SNIPPET_MAX_CHARS)
+            raise SummaryValidationError(
+                f"Crew produced no valid Summary within "
+                f"max_iter={_AGENT_MAX_ITER} / "
+                f"max_execution_time={_AGENT_MAX_EXECUTION_TIME_SECONDS}s. "
+                f"raw_output={raw_snippet!r}"
             )
         record = SummaryRecord(
             source_message_id=parsed.message_id,
