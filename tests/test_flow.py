@@ -8,15 +8,16 @@ from unittest.mock import MagicMock
 import pytest
 
 from mail_ingestor.flow import (
+    EmptyLLMResponse,
     IngestState,
     MailIngestorFlow,
     NativeAnthropicLLM,
+    ToolUseNotSupported,
     _content_as_text,
     _to_anthropic_messages,
     build_summarize_task,
     build_summarizer_agent,
 )
-from mail_ingestor.gmail.labels import LabelResolver
 from mail_ingestor.gmail.reader import GmailReaderService
 from mail_ingestor.schemas import EmailMessage, RawMessage, Summary, SummaryRecord
 
@@ -114,10 +115,8 @@ def test_native_llm_calls_client_with_default_params(monkeypatch: pytest.MonkeyP
     _seed_token(monkeypatch)
     llm = NativeAnthropicLLM(model="claude-test")
 
-    fake_block = MagicMock()
-    fake_block.text = "hello"
     llm._client = MagicMock()
-    llm._client.messages.create.return_value = MagicMock(content=[fake_block])
+    llm._client.messages.create.return_value = _mock_text_response(text="hello")
 
     result = llm.call("say hi")
 
@@ -129,11 +128,19 @@ def test_native_llm_calls_client_with_default_params(monkeypatch: pytest.MonkeyP
     )
 
 
+def _mock_text_response(text: str = "ok", stop_reason: str = "end_turn") -> MagicMock:
+    """Build a fake Anthropic Response with a single text block."""
+    block = MagicMock()
+    block.text = text
+    block.type = "text"
+    return MagicMock(content=[block], stop_reason=stop_reason)
+
+
 def test_native_llm_forwards_system_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_token(monkeypatch)
     llm = NativeAnthropicLLM(model="claude-test")
     llm._client = MagicMock()
-    llm._client.messages.create.return_value = MagicMock(content=[])
+    llm._client.messages.create.return_value = _mock_text_response()
 
     llm.call(
         [
@@ -151,11 +158,58 @@ def test_native_llm_omits_system_when_absent(monkeypatch: pytest.MonkeyPatch) ->
     _seed_token(monkeypatch)
     llm = NativeAnthropicLLM(model="claude-test")
     llm._client = MagicMock()
-    llm._client.messages.create.return_value = MagicMock(content=[])
+    llm._client.messages.create.return_value = _mock_text_response()
 
     llm.call("hi")
 
     assert "system" not in llm._client.messages.create.call_args.kwargs
+
+
+def test_native_llm_raises_on_non_empty_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_token(monkeypatch)
+    llm = NativeAnthropicLLM(model="claude-test")
+    llm._client = MagicMock()
+
+    with pytest.raises(ToolUseNotSupported, match="forwarding is not implemented"):
+        llm.call("hi", tools=[{"name": "some_tool"}])
+    llm._client.messages.create.assert_not_called()
+
+
+def test_native_llm_accepts_none_and_empty_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_token(monkeypatch)
+    llm = NativeAnthropicLLM(model="claude-test")
+    llm._client = MagicMock()
+    llm._client.messages.create.return_value = _mock_text_response()
+
+    assert llm.call("hi", tools=None) == "ok"
+    assert llm.call("hi", tools=[]) == "ok"
+
+
+def test_native_llm_raises_on_empty_response_with_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_token(monkeypatch)
+    llm = NativeAnthropicLLM(model="claude-test")
+    llm._client = MagicMock()
+    tool_use_block = MagicMock()
+    del tool_use_block.text  # simulate a block that has no `text` attribute
+    tool_use_block.type = "tool_use"
+    llm._client.messages.create.return_value = MagicMock(
+        content=[tool_use_block], stop_reason="tool_use"
+    )
+
+    with pytest.raises(EmptyLLMResponse, match="stop_reason='tool_use'"):
+        llm.call("hi")
+
+
+def test_native_llm_raises_on_truncated_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_token(monkeypatch)
+    llm = NativeAnthropicLLM(model="claude-test")
+    llm._client = MagicMock()
+    llm._client.messages.create.return_value = MagicMock(content=[], stop_reason="max_tokens")
+
+    with pytest.raises(EmptyLLMResponse, match="stop_reason='max_tokens'"):
+        llm.call("hi")
 
 
 def test_native_llm_concatenates_text_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,7 +219,9 @@ def test_native_llm_concatenates_text_blocks(monkeypatch: pytest.MonkeyPatch) ->
     b1.text = "part-A "
     b2.text = "part-B"
     llm._client = MagicMock()
-    llm._client.messages.create.return_value = MagicMock(content=[b1, b2])
+    llm._client.messages.create.return_value = MagicMock(
+        content=[b1, b2], stop_reason="end_turn"
+    )
 
     assert llm.call("hi") == "part-A part-B"
 
@@ -186,24 +242,22 @@ def test_ingest_state_defaults() -> None:
 
 def test_build_summarizer_agent_has_expected_config(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_token(monkeypatch)
-    reader = MagicMock(spec=GmailReaderService)
-    resolver = MagicMock(spec=LabelResolver)
 
-    agent = build_summarizer_agent(model="claude-x", reader=reader, resolver=resolver)
+    agent = build_summarizer_agent(model="claude-x")
 
     assert agent.role == "Email Summarizer"
     assert agent.max_iter == 10
     assert agent.max_execution_time == 120
     assert agent.allow_delegation is False
-    assert len(agent.tools) == 2
+    # Tools are deliberately not declared until forwarding is implemented in
+    # NativeAnthropicLLM — see build_summarizer_agent's docstring.
+    assert agent.tools == []
 
 
 def test_build_summarize_task_uses_output_pydantic_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _seed_token(monkeypatch)
-    reader = MagicMock(spec=GmailReaderService)
-    resolver = MagicMock(spec=LabelResolver)
     parsed = EmailMessage(
         message_id="m1",
         sender="a@x.com",
@@ -211,7 +265,7 @@ def test_build_summarize_task_uses_output_pydantic_summary(
         subject="Test",
         body_text="hello",
     )
-    agent = build_summarizer_agent(model="c", reader=reader, resolver=resolver)
+    agent = build_summarizer_agent(model="c")
     task = build_summarize_task(agent, parsed)
 
     assert task.output_pydantic is Summary
@@ -226,8 +280,7 @@ def test_build_summarize_task_uses_output_pydantic_summary(
 def test_flow_fetch_rejects_empty_message_id(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_token(monkeypatch)
     reader = MagicMock(spec=GmailReaderService)
-    resolver = MagicMock(spec=LabelResolver)
-    flow = MailIngestorFlow(reader=reader, resolver=resolver, model="c")
+    flow = MailIngestorFlow(reader=reader, model="c")
     # State.message_id defaults to "" — an unset kickoff must fail loud.
     with pytest.raises(ValueError, match="message_id"):
         flow.fetch()
@@ -238,9 +291,8 @@ def test_flow_fetch_wraps_gmail_dict_in_raw_message(monkeypatch: pytest.MonkeyPa
     _seed_token(monkeypatch)
     reader = MagicMock(spec=GmailReaderService)
     reader.get_message.return_value = {"id": "m1", "payload": {}}
-    resolver = MagicMock(spec=LabelResolver)
 
-    flow = MailIngestorFlow(reader=reader, resolver=resolver, model="c")
+    flow = MailIngestorFlow(reader=reader, model="c")
     flow.state.message_id = "m1"
     raw = flow.fetch()
 
@@ -253,9 +305,8 @@ def test_flow_fetch_wraps_gmail_dict_in_raw_message(monkeypatch: pytest.MonkeyPa
 def test_flow_parse_produces_email_message(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_token(monkeypatch)
     reader = MagicMock(spec=GmailReaderService)
-    resolver = MagicMock(spec=LabelResolver)
 
-    flow = MailIngestorFlow(reader=reader, resolver=resolver, model="c")
+    flow = MailIngestorFlow(reader=reader, model="c")
     raw = RawMessage(message_id="m1", payload=_gmail_dict(subject="Hi", body="hello"))
     parsed = flow.parse(raw)
 
@@ -275,7 +326,6 @@ def test_kickoff_produces_valid_summary_record_end_to_end(
 
     reader = MagicMock(spec=GmailReaderService)
     reader.get_message.return_value = _gmail_dict(subject="Weekly report", body="Sales up 20%")
-    resolver = MagicMock(spec=LabelResolver)
 
     canned = json.dumps(
         {
@@ -291,7 +341,7 @@ def test_kickoff_produces_valid_summary_record_end_to_end(
         lambda self, messages, **_kwargs: canned,
     )
 
-    flow = MailIngestorFlow(reader=reader, resolver=resolver, model="claude-haiku-x")
+    flow = MailIngestorFlow(reader=reader, model="claude-haiku-x")
     result = flow.kickoff(inputs={"message_id": "m1"})
 
     assert isinstance(result, SummaryRecord)

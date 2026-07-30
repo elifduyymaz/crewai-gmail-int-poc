@@ -31,7 +31,6 @@ from crewai.llms.base_llm import BaseLLM
 from crewai.utilities.types import LLMMessage
 from pydantic import BaseModel
 
-from mail_ingestor.gmail.labels import LabelResolver
 from mail_ingestor.gmail.parser import parse_gmail_message
 from mail_ingestor.gmail.reader import GmailReaderService
 from mail_ingestor.llm import get_llm_client
@@ -40,10 +39,6 @@ from mail_ingestor.schemas import (
     RawMessage,
     Summary,
     SummaryRecord,
-)
-from mail_ingestor.tools.gmail_tool import (
-    GmailGetMessageTool,
-    GmailListByLabelTool,
 )
 
 # Elifce Additions :)
@@ -104,11 +99,37 @@ def _to_anthropic_messages(
     return (turns, system)
 
 
+class ToolUseNotSupported(NotImplementedError):
+    """Raised when the native LLM adapter is asked to forward tool schemas.
+
+    ``NativeAnthropicLLM`` does not yet convert CrewAI ``BaseTool`` instances
+    to Anthropic's tool schema, nor does it decode ``tool_use`` response
+    blocks. Declaring tools on an Agent whose LLM cannot invoke them is a
+    silent-failure surface, so we raise on receipt instead of silently
+    dropping the ``tools`` argument.
+    """
+
+
+class EmptyLLMResponse(RuntimeError):
+    """Raised when Anthropic returns a response with no text content.
+
+    Common causes: ``stop_reason == "max_tokens"`` (truncated before any
+    text was emitted), ``"refusal"``, ``"pause_turn"``, or a response made
+    up entirely of non-text blocks such as ``tool_use``. Losing this
+    signal to a caller-side JSON-validation error would obscure the real
+    root cause when the flow's summarize step DLQs the message.
+    """
+
+
 class NativeAnthropicLLM(BaseLLM):
     """CrewAI ``BaseLLM`` backed by the native Anthropic SDK.
 
     Runs the native client from ``mail_ingestor.llm`` (built with an
     ``auth_token`` seed credential); does not go through litellm.
+
+    Tool forwarding is intentionally not implemented — a non-empty
+    ``tools`` argument to ``call`` raises ``ToolUseNotSupported`` so the
+    gap fails loudly instead of dropping the request silently.
     """
 
     def __init__(self, model: str) -> None:
@@ -125,6 +146,12 @@ class NativeAnthropicLLM(BaseLLM):
         from_agent: Any | None = None,
         response_model: type[BaseModel] | None = None,
     ) -> str:
+        if tools:
+            raise ToolUseNotSupported(
+                f"NativeAnthropicLLM received {len(tools)} tool schema(s); "
+                "forwarding is not implemented. Either remove tools from the "
+                "Agent or implement Anthropic tool_use in the adapter."
+            )
         turns, system = _to_anthropic_messages(messages)
         create_kwargs: dict[str, Any] = {
             "model": self.model,
@@ -134,7 +161,17 @@ class NativeAnthropicLLM(BaseLLM):
         if system is not None:
             create_kwargs["system"] = system
         response = self._client.messages.create(**create_kwargs)
-        return "".join(getattr(block, "text", "") for block in response.content)
+        text = "".join(getattr(block, "text", "") for block in response.content)
+        if not text:
+            stop_reason = getattr(response, "stop_reason", "unknown")
+            block_types = [
+                getattr(block, "type", type(block).__name__) for block in response.content
+            ]
+            raise EmptyLLMResponse(
+                f"Anthropic returned no text (stop_reason={stop_reason!r}, "
+                f"block_types={block_types})."
+            )
+        return text
 
 
 class IngestState(BaseModel):
@@ -151,21 +188,23 @@ class IngestState(BaseModel):
     summary_record: SummaryRecord | None = None
 
 
-def build_summarizer_agent(
-    model: str,
-    reader: GmailReaderService,
-    resolver: LabelResolver,
-) -> Agent:
-    """Construct the single-role summarizer Agent with the native LLM adapter."""
+def build_summarizer_agent(model: str) -> Agent:
+    """Construct the single-role summarizer Agent with the native LLM adapter.
+
+    Tools (``GmailListByLabelTool`` / ``GmailGetMessageTool``) are
+    intentionally not declared here even though Task 3.3's AC lists them:
+    the ``NativeAnthropicLLM`` adapter does not yet forward Anthropic tool
+    schemas or decode ``tool_use`` response blocks. Declaring the tools
+    while they cannot be invoked from the LLM path would let the Agent
+    appear tool-enabled while the surface silently no-ops. Re-add
+    ``tools=[...]`` in the same pass that implements forwarding in the
+    adapter.
+    """
     return Agent(
         role=_SUMMARIZER_ROLE,
         goal=_SUMMARIZER_GOAL,
         backstory=_SUMMARIZER_BACKSTORY,
         llm=NativeAnthropicLLM(model=model),
-        tools=[
-            GmailListByLabelTool(reader=reader, resolver=resolver),
-            GmailGetMessageTool(reader=reader),
-        ],
         max_iter=_AGENT_MAX_ITER,
         max_execution_time=_AGENT_MAX_EXECUTION_TIME_SECONDS,
         memory=False,
@@ -214,12 +253,10 @@ class MailIngestorFlow(Flow[IngestState]):
     def __init__(
         self,
         reader: GmailReaderService,
-        resolver: LabelResolver,
         model: str,
     ) -> None:
         super().__init__()
         self._reader = reader
-        self._resolver = resolver
         self._model = model
 
     @start()
@@ -243,7 +280,7 @@ class MailIngestorFlow(Flow[IngestState]):
 
     @listen(parse)
     def summarize(self, parsed: EmailMessage) -> SummaryRecord:
-        agent = build_summarizer_agent(self._model, self._reader, self._resolver)
+        agent = build_summarizer_agent(self._model)
         task = build_summarize_task(agent, parsed)
         crew = Crew(
             agents=[agent],
