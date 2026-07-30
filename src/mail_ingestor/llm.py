@@ -3,7 +3,7 @@
 Sole module in the package that constructs the Anthropic SDK client — no other
 module imports ``anthropic`` (enforced by ``tests/test_discipline.py``).
 Deliberately does not ``import crewai``: framework wrapping (a ``BaseLLM``
-subclass that consumes this client) belongs under ``crew/``, keeping the
+subclass that consumes this client) lives in ``flow.py``, keeping the
 provider abstraction outside the framework fence.
 
 Authentication uses a Claude OAuth/seed token

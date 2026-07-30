@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import Enum
+from typing import Any
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -30,6 +31,18 @@ class _StrictModel(BaseModel):
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", protected_namespaces=())
+
+
+class RawMessage(_StrictModel):
+    """Gmail-fetched message before MIME parsing.
+
+    Thin typed wrapper around the raw Gmail resource dict, used as the
+    hand-off between the ``fetch`` and ``parse`` steps of the pipeline so
+    intermediate state stays Pydantic-typed rather than a bare ``dict``.
+    """
+
+    message_id: str = Field(min_length=1)
+    payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class EmailMessage(_StrictModel):
