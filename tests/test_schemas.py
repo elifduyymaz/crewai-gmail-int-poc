@@ -7,6 +7,7 @@ from mail_ingestor.schemas import (
     DeadLetterRecord,
     EmailMessage,
     ProcessingStage,
+    RawMessage,
     Summary,
     SummaryRecord,
 )
@@ -196,3 +197,29 @@ def test_dead_letter_rejects_naive_failed_at():
             error="x",
             failed_at=datetime(2026, 7, 24, 12, 0),  # noqa: DTZ001
         )
+
+
+def test_raw_message_minimal_valid():
+    raw = RawMessage(message_id="m1")
+    assert raw.message_id == "m1"
+    assert raw.payload == {}
+
+
+def test_raw_message_carries_gmail_dict():
+    payload = {"id": "m1", "internalDate": "1700000000000", "payload": {"headers": []}}
+    raw = RawMessage(message_id="m1", payload=payload)
+    assert raw.payload is not payload  # frozen model does not alias
+    assert raw.payload == payload
+
+
+def test_raw_message_requires_message_id_nonempty():
+    with pytest.raises(ValidationError):
+        RawMessage(message_id="")
+
+
+def test_raw_message_is_frozen_and_forbids_extras():
+    raw = RawMessage(message_id="m1")
+    with pytest.raises(ValidationError):
+        raw.message_id = "m2"
+    with pytest.raises(ValidationError):
+        RawMessage(message_id="m1", stray="oops")
