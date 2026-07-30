@@ -1,7 +1,8 @@
 """Framework-agnostic discipline invariants:
 
-  1. ``crewai`` imports live only inside the 2-file fence (``crew/`` and
-     ``tools/gmail_tool.py``).
+  1. ``crewai`` imports live only inside the two fence files defined by
+     architecture.md § Provider abstraction: ``flow.py`` and
+     ``tools/gmail_tool.py``.
   2. The native LLM SDK (``anthropic``) is imported only in ``llm.py`` — the
      sole provider-abstraction point (NFR-I2).
 
@@ -18,17 +19,17 @@ _CREWAI_IMPORT = re.compile(r"^\s*(?:from|import)\s+crewai(?:\b|\.)", re.MULTILI
 _ANTHROPIC_IMPORT = re.compile(r"^\s*(?:from|import)\s+anthropic(?:\b|\.)", re.MULTILINE)
 
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent / "src" / "mail_ingestor"
-_CREW_DIR = _PACKAGE_ROOT / "crew"
 _LLM_MODULE = _PACKAGE_ROOT / "llm.py"
-_FENCE_FILES: frozenset[Path] = frozenset({_PACKAGE_ROOT / "tools" / "gmail_tool.py"})
-
-
-def _is_fenced(path: Path) -> bool:
-    return _CREW_DIR in path.parents or path == _CREW_DIR or path in _FENCE_FILES
+_FENCE_FILES: frozenset[Path] = frozenset(
+    {
+        _PACKAGE_ROOT / "flow.py",
+        _PACKAGE_ROOT / "tools" / "gmail_tool.py",
+    }
+)
 
 
 def _core_python_files() -> list[Path]:
-    return [p for p in _PACKAGE_ROOT.rglob("*.py") if not _is_fenced(p)]
+    return [p for p in _PACKAGE_ROOT.rglob("*.py") if p not in _FENCE_FILES]
 
 
 def test_no_crewai_import_in_core() -> None:
@@ -38,7 +39,7 @@ def test_no_crewai_import_in_core() -> None:
         if _CREWAI_IMPORT.search(p.read_text(encoding="utf-8"))
     ]
     assert not offenders, (
-        f"crewai imported outside the 2-file fence (crew/ + tools/gmail_tool.py): {offenders}"
+        f"crewai imported outside the 2-file fence (flow.py + tools/gmail_tool.py): {offenders}"
     )
 
 
