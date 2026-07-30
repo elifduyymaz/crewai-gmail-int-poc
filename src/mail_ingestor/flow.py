@@ -224,8 +224,14 @@ class MailIngestorFlow(Flow[IngestState]):
 
     @start()
     def fetch(self) -> RawMessage:
-        payload = self._reader.get_message(self.state.message_id)
-        raw = RawMessage(message_id=self.state.message_id, payload=payload)
+        message_id = self.state.message_id
+        if not message_id:
+            raise ValueError(
+                "MailIngestorFlow was kicked off without a message_id; "
+                "call `flow.kickoff(inputs={'message_id': ...})`."
+            )
+        payload = self._reader.get_message(message_id)
+        raw = RawMessage(message_id=message_id, payload=payload)
         self.state.raw = raw
         return raw
 

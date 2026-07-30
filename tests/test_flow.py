@@ -223,6 +223,17 @@ def test_build_summarize_task_uses_output_pydantic_summary(
 # ---------- MailIngestorFlow steps ----------
 
 
+def test_flow_fetch_rejects_empty_message_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_token(monkeypatch)
+    reader = MagicMock(spec=GmailReaderService)
+    resolver = MagicMock(spec=LabelResolver)
+    flow = MailIngestorFlow(reader=reader, resolver=resolver, model="c")
+    # State.message_id defaults to "" — an unset kickoff must fail loud.
+    with pytest.raises(ValueError, match="message_id"):
+        flow.fetch()
+    reader.get_message.assert_not_called()
+
+
 def test_flow_fetch_wraps_gmail_dict_in_raw_message(monkeypatch: pytest.MonkeyPatch) -> None:
     _seed_token(monkeypatch)
     reader = MagicMock(spec=GmailReaderService)
