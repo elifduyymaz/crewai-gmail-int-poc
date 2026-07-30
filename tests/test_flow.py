@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from mail_ingestor.config import MissingSettingError
 from mail_ingestor.flow import (
     EmptyLLMResponse,
     IngestState,
@@ -221,9 +222,7 @@ def test_native_llm_concatenates_text_blocks(monkeypatch: pytest.MonkeyPatch) ->
     b1.text = "part-A "
     b2.text = "part-B"
     llm._client = MagicMock()
-    llm._client.messages.create.return_value = MagicMock(
-        content=[b1, b2], stop_reason="end_turn"
-    )
+    llm._client.messages.create.return_value = MagicMock(content=[b1, b2], stop_reason="end_turn")
 
     assert llm.call("hi") == "part-A part-B"
 
@@ -428,6 +427,50 @@ def test_kickoff_produces_valid_summary_record_end_to_end(
     assert result.model == "claude-haiku-x"
     assert result.summary.tl_dr == "Weekly sales up 20%."
     assert result.summary.category == "report"
+
+
+def test_kickoff_end_to_end_exercises_the_real_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Patch the Anthropic client factory (not the adapter's `.call`) so the
+    adapter's real message-conversion and response-parsing code runs.
+
+    The monkeypatched E2E above proves the flow wires up; this one proves
+    the NativeAnthropicLLM implementation is actually reachable end-to-end.
+    """
+    _seed_token(monkeypatch)
+
+    reader = MagicMock(spec=GmailReaderService)
+    reader.get_message.return_value = _gmail_dict(subject="Q4", body="Numbers up.")
+
+    canned = json.dumps(
+        {
+            "tl_dr": "Q4 numbers up.",
+            "summary": "Q4 report shows growth.",
+            "key_points": ["growth"],
+            "action_items": [],
+            "category": "report",
+        }
+    )
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = _mock_text_response(text=canned)
+    monkeypatch.setattr("mail_ingestor.flow.get_llm_client", lambda: fake_client)
+
+    flow = MailIngestorFlow(reader=reader, model="claude-x")
+    result = flow.kickoff(inputs={"message_id": "m1"})
+
+    assert isinstance(result, SummaryRecord)
+    assert result.summary.tl_dr == "Q4 numbers up."
+    fake_client.messages.create.assert_called()
+    # Tools are not declared on the Agent yet, so none should leak through.
+    for call in fake_client.messages.create.call_args_list:
+        assert not call.kwargs.get("tools")
+
+
+def test_native_llm_propagates_missing_auth_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "")
+    with pytest.raises(MissingSettingError, match="ANTHROPIC_AUTH_TOKEN"):
+        NativeAnthropicLLM(model="c")
 
 
 def test_kickoff_env_opts_out_of_crewai_telemetry() -> None:

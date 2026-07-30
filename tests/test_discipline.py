@@ -39,8 +39,7 @@ def test_no_crewai_import_in_core() -> None:
         if _CREWAI_IMPORT.search(p.read_text(encoding="utf-8"))
     ]
     assert not offenders, (
-        f"crewai imported outside the 2-file fence "
-        f"(flow.py + tools/gmail_tool.py): {offenders}"
+        f"crewai imported outside the 2-file fence (flow.py + tools/gmail_tool.py): {offenders}"
     )
 
 
