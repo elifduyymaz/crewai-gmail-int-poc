@@ -50,8 +50,28 @@ def test_summary_records_has_expected_columns():
         "action_items",
         "category",
         "model",
+        "tokens_prompt",
+        "tokens_completion",
         "created_at",
     } <= cols
+
+
+def test_summary_records_token_columns_are_nullable():
+    # tokens_prompt / tokens_completion mirror SummaryRecord's Optional[int]
+    # semantics (None = "no usage observed"); a partial INSERT that omits
+    # them must succeed rather than raise NOT NULL.
+    conn = init_db(":memory:")
+    conn.execute(
+        "INSERT INTO summary_records "
+        "(source_message_id, tl_dr, summary, category, model, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("m1", "t", "s", "c", "model-x", "2026-01-01T00:00:00+00:00"),
+    )
+    row = conn.execute(
+        "SELECT tokens_prompt, tokens_completion FROM summary_records"
+    ).fetchone()
+    assert row["tokens_prompt"] is None
+    assert row["tokens_completion"] is None
 
 
 def test_dead_letters_has_expected_columns():

@@ -14,8 +14,10 @@ from mail_ingestor.flow import (
     MailIngestorFlow,
     NativeAnthropicLLM,
     SummaryValidationError,
+    TokenUsage,
     ToolUseNotSupported,
     _content_as_text,
+    _make_token_step_callback,
     _to_anthropic_messages,
     _truncate,
     build_summarize_task,
@@ -479,3 +481,249 @@ def test_kickoff_env_opts_out_of_crewai_telemetry() -> None:
     import mail_ingestor.flow  # noqa: F401  — imports set the env var
 
     assert os.environ.get("CREWAI_TELEMETRY_OPT_OUT") == "1"
+
+
+# ---------- TokenUsage accumulator (Task 3.4) ----------
+
+
+def _mock_response_with_usage(
+    text: str = "ok",
+    input_tokens: int | None = 100,
+    output_tokens: int | None = 50,
+    stop_reason: str = "end_turn",
+    include_usage: bool = True,
+) -> MagicMock:
+    """Fake Anthropic response with a controllable ``.usage`` block."""
+    block = MagicMock()
+    block.text = text
+    block.type = "text"
+    response = MagicMock(content=[block], stop_reason=stop_reason)
+    if include_usage:
+        usage = MagicMock()
+        usage.input_tokens = input_tokens
+        usage.output_tokens = output_tokens
+        response.usage = usage
+    else:
+        response.usage = None
+    return response
+
+
+def test_token_usage_starts_none_none() -> None:
+    usage = TokenUsage()
+    assert usage.prompt is None
+    assert usage.completion is None
+
+
+def test_token_usage_observe_accumulates_both_fields() -> None:
+    usage = TokenUsage()
+    usage.observe(5, 3)
+    usage.observe(2, 1)
+    assert usage.prompt == 7
+    assert usage.completion == 4
+
+
+def test_token_usage_observe_none_leaves_totals_untouched() -> None:
+    usage = TokenUsage()
+    usage.observe(10, 4)
+    usage.observe(None, None)
+    assert usage.prompt == 10
+    assert usage.completion == 4
+
+
+def test_token_usage_partial_observation_updates_known_field_only() -> None:
+    usage = TokenUsage()
+    usage.observe(5, None)
+    assert usage.prompt == 5
+    assert usage.completion is None
+    usage.observe(None, 3)
+    assert usage.prompt == 5
+    assert usage.completion == 3
+
+
+def test_token_usage_reset_returns_to_unobserved_state() -> None:
+    usage = TokenUsage()
+    usage.observe(10, 4)
+    usage.reset()
+    assert usage.prompt is None
+    assert usage.completion is None
+
+
+def test_native_llm_no_usage_sink_is_a_no_op(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Adapter must run cleanly when no usage sink is provided (the default),
+    # so callers that don't care about accounting pay no penalty.
+    _seed_token(monkeypatch)
+    llm = NativeAnthropicLLM(model="claude-x")
+    llm._client = MagicMock()
+    llm._client.messages.create.return_value = _mock_response_with_usage(text="ok")
+    assert llm.call("hi") == "ok"
+
+
+def test_native_llm_records_usage_on_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    _seed_token(monkeypatch)
+    usage = TokenUsage()
+    llm = NativeAnthropicLLM(model="claude-x", usage_sink=usage)
+    llm._client = MagicMock()
+    llm._client.messages.create.return_value = _mock_response_with_usage(
+        input_tokens=42, output_tokens=17
+    )
+    llm.call("say hi")
+    assert usage.prompt == 42
+    assert usage.completion == 17
+
+
+def test_native_llm_accumulates_usage_across_two_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Task 3.4 AC: verify accumulation across Agent iterations by exercising
+    # two sequential adapter calls with distinct usage blocks.
+    _seed_token(monkeypatch)
+    usage = TokenUsage()
+    llm = NativeAnthropicLLM(model="claude-x", usage_sink=usage)
+    llm._client = MagicMock()
+    llm._client.messages.create.side_effect = [
+        _mock_response_with_usage(text="step1", input_tokens=100, output_tokens=50),
+        _mock_response_with_usage(text="step2", input_tokens=200, output_tokens=75),
+    ]
+    llm.call("first")
+    llm.call("second")
+    assert usage.prompt == 300
+    assert usage.completion == 125
+
+
+def test_native_llm_missing_usage_attribute_leaves_sink_untouched(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_token(monkeypatch)
+    usage = TokenUsage()
+    llm = NativeAnthropicLLM(model="claude-x", usage_sink=usage)
+    llm._client = MagicMock()
+    llm._client.messages.create.return_value = _mock_response_with_usage(include_usage=False)
+    llm.call("hi")
+    assert usage.prompt is None
+    assert usage.completion is None
+
+
+def test_native_llm_partial_usage_fields_update_only_known_metric(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_token(monkeypatch)
+    usage = TokenUsage()
+    llm = NativeAnthropicLLM(model="claude-x", usage_sink=usage)
+    llm._client = MagicMock()
+    llm._client.messages.create.return_value = _mock_response_with_usage(
+        input_tokens=50, output_tokens=None
+    )
+    llm.call("hi")
+    assert usage.prompt == 50
+    assert usage.completion is None
+
+
+def test_make_token_step_callback_emits_debug_log_without_body(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    usage = TokenUsage()
+    usage.observe(10, 5)
+    callback = _make_token_step_callback(usage)
+    fake_step = MagicMock()
+    fake_step.__class__.__name__ = "AgentAction"
+    with caplog.at_level("DEBUG", logger="mail_ingestor.flow"):
+        callback(fake_step)
+    matching = [r for r in caplog.records if "agent_step" in r.getMessage()]
+    assert matching, "expected an agent_step debug record"
+    message = matching[0].getMessage()
+    assert "tokens_prompt=10" in message
+    assert "tokens_completion=5" in message
+
+
+def test_kickoff_populates_summary_record_with_token_totals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_token(monkeypatch)
+    reader = MagicMock(spec=GmailReaderService)
+    reader.get_message.return_value = _gmail_dict()
+
+    canned = json.dumps(
+        {
+            "tl_dr": "t",
+            "summary": "s",
+            "key_points": [],
+            "action_items": [],
+            "category": "c",
+        }
+    )
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = _mock_response_with_usage(
+        text=canned, input_tokens=120, output_tokens=40
+    )
+    monkeypatch.setattr("mail_ingestor.flow.get_llm_client", lambda: fake_client)
+
+    flow = MailIngestorFlow(reader=reader, model="claude-x")
+    result = flow.kickoff(inputs={"message_id": "m1"})
+
+    assert isinstance(result, SummaryRecord)
+    assert result.tokens_prompt == 120
+    assert result.tokens_completion == 40
+
+
+def test_kickoff_missing_usage_yields_none_token_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_token(monkeypatch)
+    reader = MagicMock(spec=GmailReaderService)
+    reader.get_message.return_value = _gmail_dict()
+
+    canned = json.dumps(
+        {
+            "tl_dr": "t",
+            "summary": "s",
+            "key_points": [],
+            "action_items": [],
+            "category": "c",
+        }
+    )
+    fake_client = MagicMock()
+    fake_client.messages.create.return_value = _mock_response_with_usage(
+        text=canned, include_usage=False
+    )
+    monkeypatch.setattr("mail_ingestor.flow.get_llm_client", lambda: fake_client)
+
+    flow = MailIngestorFlow(reader=reader, model="claude-x")
+    result = flow.kickoff(inputs={"message_id": "m1"})
+
+    assert result.tokens_prompt is None
+    assert result.tokens_completion is None
+
+
+def test_kickoff_resets_accumulator_between_sequential_kickoffs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A reused Flow instance must not leak token totals from message N-1
+    # into message N. The `summarize` step calls `reset()` before each run.
+    _seed_token(monkeypatch)
+    reader = MagicMock(spec=GmailReaderService)
+    reader.get_message.return_value = _gmail_dict()
+
+    canned = json.dumps(
+        {
+            "tl_dr": "t",
+            "summary": "s",
+            "key_points": [],
+            "action_items": [],
+            "category": "c",
+        }
+    )
+    fake_client = MagicMock()
+    fake_client.messages.create.side_effect = [
+        _mock_response_with_usage(text=canned, input_tokens=100, output_tokens=30),
+        _mock_response_with_usage(text=canned, input_tokens=50, output_tokens=10),
+    ]
+    monkeypatch.setattr("mail_ingestor.flow.get_llm_client", lambda: fake_client)
+
+    flow = MailIngestorFlow(reader=reader, model="claude-x")
+    first = flow.kickoff(inputs={"message_id": "m1"})
+    second = flow.kickoff(inputs={"message_id": "m2"})
+
+    assert first.tokens_prompt == 100
+    assert first.tokens_completion == 30
+    assert second.tokens_prompt == 50
+    assert second.tokens_completion == 10

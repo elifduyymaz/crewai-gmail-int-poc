@@ -71,12 +71,21 @@ class Summary(_StrictModel):
 
 
 class SummaryRecord(_StrictModel):
-    """Outbound / persistence boundary: a ``Summary`` plus provenance."""
+    """Outbound / persistence boundary: a ``Summary`` plus provenance.
+
+    ``tokens_prompt`` / ``tokens_completion`` are best-effort accumulators
+    populated by the LLM adapter's usage observer (see ``flow.TokenUsage``).
+    ``None`` signals "no usage data was observed for this message" (rate-
+    limited, mocked, or adapter did not surface it) — distinct from ``0``
+    which would incorrectly assert "zero tokens were spent".
+    """
 
     source_message_id: str = Field(min_length=1)
     subject: str = ""
     summary: Summary
     model: str = Field(min_length=1)
+    tokens_prompt: int | None = Field(default=None, ge=0)
+    tokens_completion: int | None = Field(default=None, ge=0)
     created_at: AwareDatetime = Field(default_factory=_utcnow)
 
 

@@ -63,6 +63,26 @@ def test_write_summary_persists_flattened_fields():
     assert row["created_at"] == AWARE.isoformat()
 
 
+def test_write_summary_persists_token_totals_when_present():
+    writer = _writer()
+    writer.write_summary(_summary_record(tokens_prompt=1234, tokens_completion=567))
+    row = writer._conn.execute(
+        "SELECT tokens_prompt, tokens_completion FROM summary_records"
+    ).fetchone()
+    assert row["tokens_prompt"] == 1234
+    assert row["tokens_completion"] == 567
+
+
+def test_write_summary_persists_null_tokens_when_absent():
+    writer = _writer()
+    writer.write_summary(_summary_record())  # no tokens_prompt / tokens_completion
+    row = writer._conn.execute(
+        "SELECT tokens_prompt, tokens_completion FROM summary_records"
+    ).fetchone()
+    assert row["tokens_prompt"] is None
+    assert row["tokens_completion"] is None
+
+
 def test_write_summary_json_encodes_lists():
     writer = _writer()
     writer.write_summary(_summary_record())

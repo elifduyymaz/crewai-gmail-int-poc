@@ -138,6 +138,41 @@ def test_summary_record_no_protected_namespace_warning(recwarn):
     assert not [w for w in recwarn.list if "protected namespace" in str(w.message).lower()]
 
 
+def test_summary_record_token_fields_default_to_none():
+    rec = SummaryRecord(source_message_id="m1", summary=_summary(), model="m")
+    assert rec.tokens_prompt is None
+    assert rec.tokens_completion is None
+
+
+def test_summary_record_accepts_non_negative_token_counts():
+    rec = SummaryRecord(
+        source_message_id="m1",
+        summary=_summary(),
+        model="m",
+        tokens_prompt=0,
+        tokens_completion=1_000_000,
+    )
+    assert rec.tokens_prompt == 0
+    assert rec.tokens_completion == 1_000_000
+
+
+def test_summary_record_rejects_negative_token_counts():
+    with pytest.raises(ValidationError):
+        SummaryRecord(
+            source_message_id="m1",
+            summary=_summary(),
+            model="m",
+            tokens_prompt=-1,
+        )
+    with pytest.raises(ValidationError):
+        SummaryRecord(
+            source_message_id="m1",
+            summary=_summary(),
+            model="m",
+            tokens_completion=-5,
+        )
+
+
 # --- ProcessingStage + DeadLetterRecord ---
 
 
