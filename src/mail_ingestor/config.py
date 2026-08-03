@@ -19,6 +19,8 @@ from dotenv import load_dotenv
 
 DEFAULT_LLM_MODEL = "claude-haiku-4-5-20251001"
 DEFAULT_SQLITE_DB_PATH = Path("mail_ingestor.db")
+DEFAULT_LOG_LEVEL = "INFO"
+_VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
 
 class MissingSettingError(RuntimeError):
@@ -36,15 +38,17 @@ class Settings:
     anthropic_auth_token: str = field(repr=False)
     llm_model: str = DEFAULT_LLM_MODEL
     sqlite_db_path: Path = DEFAULT_SQLITE_DB_PATH
+    log_level: str = DEFAULT_LOG_LEVEL
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> Settings:
         """Build ``Settings`` from environment variables.
 
         Reads ``ANTHROPIC_AUTH_TOKEN`` (required — a Claude OAuth/seed token),
-        ``LLM_MODEL`` (optional, defaults to ``DEFAULT_LLM_MODEL``), and
-        ``SQLITE_DB_PATH`` (optional, defaults to ``DEFAULT_SQLITE_DB_PATH``).
-        This project does not use ``ANTHROPIC_API_KEY``.
+        ``LLM_MODEL`` (optional, defaults to ``DEFAULT_LLM_MODEL``),
+        ``SQLITE_DB_PATH`` (optional, defaults to ``DEFAULT_SQLITE_DB_PATH``),
+        and ``LOG_LEVEL`` (optional, defaults to ``INFO``; validated against
+        ``_VALID_LOG_LEVELS``). This project does not use ``ANTHROPIC_API_KEY``.
         """
         if load_dotenv_file:
             load_dotenv()
@@ -56,8 +60,15 @@ class Settings:
         llm_model = os.environ.get("LLM_MODEL", "").strip() or DEFAULT_LLM_MODEL
         db_path_raw = os.environ.get("SQLITE_DB_PATH", "").strip()
         sqlite_db_path = Path(db_path_raw) if db_path_raw else DEFAULT_SQLITE_DB_PATH
+        log_level_raw = os.environ.get("LOG_LEVEL", "").strip().upper() or DEFAULT_LOG_LEVEL
+        if log_level_raw not in _VALID_LOG_LEVELS:
+            raise MissingSettingError(
+                f"LOG_LEVEL={log_level_raw!r} is not one of "
+                f"{sorted(_VALID_LOG_LEVELS)} (see .env.example)."
+            )
         return cls(
             anthropic_auth_token=auth_token,
             llm_model=llm_model,
             sqlite_db_path=sqlite_db_path,
+            log_level=log_level_raw,
         )
