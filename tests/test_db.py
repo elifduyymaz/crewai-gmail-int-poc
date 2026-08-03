@@ -57,7 +57,28 @@ def test_summary_records_has_expected_columns():
 def test_dead_letters_has_expected_columns():
     conn = init_db(":memory:")
     cols = {row[1] for row in conn.execute("PRAGMA table_info(dead_letters)")}
-    assert {"id", "source_message_id", "stage", "error", "failed_at"} <= cols
+    assert {
+        "id",
+        "source_message_id",
+        "stage",
+        "error",
+        "traceback",
+        "failed_at",
+    } <= cols
+
+
+def test_dead_letters_traceback_defaults_to_empty_string():
+    # DlqWriter always passes a captured traceback, but INSERTs that omit
+    # the column still succeed (NOT NULL DEFAULT '') so a partial insert
+    # can never wedge the batch.
+    conn = init_db(":memory:")
+    conn.execute(
+        "INSERT INTO dead_letters (source_message_id, stage, error, failed_at) "
+        "VALUES (?, ?, ?, ?)",
+        ("m1", "read", "e", "2026-01-01T00:00:00+00:00"),
+    )
+    row = conn.execute("SELECT traceback FROM dead_letters").fetchone()
+    assert row["traceback"] == ""
 
 
 def test_unique_source_message_id_rejects_duplicate():

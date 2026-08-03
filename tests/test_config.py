@@ -1,8 +1,14 @@
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import pytest
 
-from mail_ingestor.config import DEFAULT_LLM_MODEL, MissingSettingError, Settings
+from mail_ingestor.config import (
+    DEFAULT_LLM_MODEL,
+    DEFAULT_SQLITE_DB_PATH,
+    MissingSettingError,
+    Settings,
+)
 
 
 def test_default_llm_model_constant():
@@ -51,3 +57,21 @@ def test_repr_masks_auth_token():
     settings = Settings(anthropic_auth_token="tok-super-secret")
     assert "tok-super-secret" not in repr(settings)
     assert "tok-super-secret" not in str(settings)
+
+
+def test_default_sqlite_db_path_constant():
+    assert DEFAULT_SQLITE_DB_PATH == Path("mail_ingestor.db")
+
+
+def test_from_env_uses_default_sqlite_db_path(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test-123")
+    monkeypatch.delenv("SQLITE_DB_PATH", raising=False)
+    settings = Settings.from_env(load_dotenv_file=False)
+    assert settings.sqlite_db_path == DEFAULT_SQLITE_DB_PATH
+
+
+def test_from_env_honors_sqlite_db_path_override(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test-123")
+    monkeypatch.setenv("SQLITE_DB_PATH", "/tmp/other-vault.db")
+    settings = Settings.from_env(load_dotenv_file=False)
+    assert settings.sqlite_db_path == Path("/tmp/other-vault.db")

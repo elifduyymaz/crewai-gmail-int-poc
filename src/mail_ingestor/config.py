@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 DEFAULT_LLM_MODEL = "claude-haiku-4-5-20251001"
+DEFAULT_SQLITE_DB_PATH = Path("mail_ingestor.db")
 
 
 class MissingSettingError(RuntimeError):
@@ -33,14 +35,16 @@ class Settings:
 
     anthropic_auth_token: str = field(repr=False)
     llm_model: str = DEFAULT_LLM_MODEL
+    sqlite_db_path: Path = DEFAULT_SQLITE_DB_PATH
 
     @classmethod
     def from_env(cls, *, load_dotenv_file: bool = True) -> Settings:
         """Build ``Settings`` from environment variables.
 
-        Reads ``ANTHROPIC_AUTH_TOKEN`` (required — a Claude OAuth/seed token) and
-        ``LLM_MODEL`` (optional, defaults to ``DEFAULT_LLM_MODEL``). This project does
-        not use ``ANTHROPIC_API_KEY``.
+        Reads ``ANTHROPIC_AUTH_TOKEN`` (required — a Claude OAuth/seed token),
+        ``LLM_MODEL`` (optional, defaults to ``DEFAULT_LLM_MODEL``), and
+        ``SQLITE_DB_PATH`` (optional, defaults to ``DEFAULT_SQLITE_DB_PATH``).
+        This project does not use ``ANTHROPIC_API_KEY``.
         """
         if load_dotenv_file:
             load_dotenv()
@@ -50,4 +54,10 @@ class Settings:
                 "ANTHROPIC_AUTH_TOKEN is required but is unset or blank (see .env.example)."
             )
         llm_model = os.environ.get("LLM_MODEL", "").strip() or DEFAULT_LLM_MODEL
-        return cls(anthropic_auth_token=auth_token, llm_model=llm_model)
+        db_path_raw = os.environ.get("SQLITE_DB_PATH", "").strip()
+        sqlite_db_path = Path(db_path_raw) if db_path_raw else DEFAULT_SQLITE_DB_PATH
+        return cls(
+            anthropic_auth_token=auth_token,
+            llm_model=llm_model,
+            sqlite_db_path=sqlite_db_path,
+        )

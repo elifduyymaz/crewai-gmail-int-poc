@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS dead_letters (
     source_message_id TEXT,
     stage TEXT NOT NULL,
     error TEXT NOT NULL,
+    traceback TEXT NOT NULL DEFAULT '',
     failed_at TEXT NOT NULL
 )
 """
