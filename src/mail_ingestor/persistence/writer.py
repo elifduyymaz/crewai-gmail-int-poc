@@ -40,8 +40,9 @@ class VaultWriter:
             cursor = self._conn.execute(
                 "INSERT OR IGNORE INTO summary_records "
                 "(source_message_id, subject, tl_dr, summary, key_points, "
-                "action_items, category, model, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "action_items, category, model, tokens_prompt, "
+                "tokens_completion, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     record.source_message_id,
                     record.subject,
@@ -51,6 +52,8 @@ class VaultWriter:
                     json.dumps(summary.action_items),
                     summary.category,
                     record.model,
+                    record.tokens_prompt,
+                    record.tokens_completion,
                     record.created_at.isoformat(),
                 ),
             )

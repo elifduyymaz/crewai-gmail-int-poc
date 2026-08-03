@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS summary_records (
     action_items TEXT NOT NULL DEFAULT '[]',
     category TEXT NOT NULL,
     model TEXT NOT NULL,
+    tokens_prompt INTEGER,
+    tokens_completion INTEGER,
     created_at TEXT NOT NULL
 )
 """

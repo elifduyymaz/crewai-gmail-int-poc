@@ -19,10 +19,12 @@ The module opts the process out of CrewAI telemetry before it imports
 
 from __future__ import annotations
 
+import logging
 import os
 
 os.environ.setdefault("CREWAI_TELEMETRY_OPT_OUT", "1")
 
+from dataclasses import dataclass
 from typing import Any
 
 from crewai import Agent, Crew, Process, Task
@@ -30,6 +32,8 @@ from crewai.flow import Flow, listen, start
 from crewai.llms.base_llm import BaseLLM
 from crewai.utilities.types import LLMMessage
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from mail_ingestor.gmail.parser import parse_gmail_message
 from mail_ingestor.gmail.reader import GmailReaderService
@@ -54,6 +58,36 @@ _SUMMARIZER_BACKSTORY = (
     "you emit exactly the JSON schema requested."
 )
 _RAW_SNIPPET_MAX_CHARS = 200
+
+
+@dataclass(slots=True)
+class TokenUsage:
+    """Best-effort per-message token accumulator.
+
+    ``None`` on either total means "no LLM call ever reported that metric".
+    Any observed count is added to a running sum, so calls with only partial
+    usage (e.g. only ``input_tokens`` present) still contribute what they can.
+
+    This lives outside the LLM adapter as a plain dataclass so the framework-
+    binding layer (``NativeAnthropicLLM``) can be swapped or mocked without
+    touching the accumulator's semantics. The flow instantiates one per
+    message and passes it to the adapter and to the Agent's step callback.
+    """
+
+    prompt: int | None = None
+    completion: int | None = None
+
+    def observe(self, prompt: int | None, completion: int | None) -> None:
+        """Merge one API-call's usage into the running totals; ``None`` is a no-op."""
+        if prompt is not None:
+            self.prompt = (self.prompt or 0) + prompt
+        if completion is not None:
+            self.completion = (self.completion or 0) + completion
+
+    def reset(self) -> None:
+        """Zero the accumulator back to the unobserved state (``None`` for both)."""
+        self.prompt = None
+        self.completion = None
 
 
 def _truncate(text: str | None, limit: int) -> str | None:
@@ -149,11 +183,21 @@ class NativeAnthropicLLM(BaseLLM):
     Tool forwarding is intentionally not implemented — a non-empty
     ``tools`` argument to ``call`` raises ``ToolUseNotSupported`` so the
     gap fails loudly instead of dropping the request silently.
+
+    Token usage: if a ``TokenUsage`` sink is provided, each successful API
+    call's ``response.usage.input_tokens`` / ``output_tokens`` is merged
+    into the accumulator. Missing usage fields are a no-op (``observe``
+    ignores ``None``) so a mocked or usage-less response cannot crash the
+    call path. This is the load-bearing surface for FR15 — the step
+    callback merely logs iteration boundaries; accumulation happens here
+    where the raw usage block is available before we discard the
+    response.
     """
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, usage_sink: TokenUsage | None = None) -> None:
         super().__init__(model=model)
         self._client = get_llm_client()
+        self._usage_sink = usage_sink
 
     def call(
         self,
@@ -180,6 +224,7 @@ class NativeAnthropicLLM(BaseLLM):
         if system is not None:
             create_kwargs["system"] = system
         response = self._client.messages.create(**create_kwargs)
+        self._record_usage(response)
         text = "".join(getattr(block, "text", "") for block in response.content)
         if not text:
             stop_reason = getattr(response, "stop_reason", "unknown")
@@ -191,6 +236,17 @@ class NativeAnthropicLLM(BaseLLM):
                 f"block_types={block_types})."
             )
         return text
+
+    def _record_usage(self, response: Any) -> None:
+        """Merge ``response.usage`` into the sink; tolerant of missing fields."""
+        if self._usage_sink is None:
+            return
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return
+        prompt = getattr(usage, "input_tokens", None)
+        completion = getattr(usage, "output_tokens", None)
+        self._usage_sink.observe(prompt, completion)
 
 
 class IngestState(BaseModel):
@@ -207,7 +263,31 @@ class IngestState(BaseModel):
     summary_record: SummaryRecord | None = None
 
 
-def build_summarizer_agent(model: str) -> Agent:
+def _make_token_step_callback(usage: TokenUsage) -> Any:
+    """Build a CrewAI ``step_callback`` that logs iteration boundaries.
+
+    CrewAI invokes ``step_callback`` after each Agent thought/action step
+    with an ``AgentAction`` / ``AgentFinish`` object. Token counts are
+    already accumulated by ``NativeAnthropicLLM._record_usage`` at the API
+    boundary (where ``response.usage`` is live); this callback exposes the
+    running totals at DEBUG so a verbose run shows per-step budget burn
+    without depending on the step object's shape (which drifts across
+    CrewAI releases).
+    """
+
+    def step_callback(step: Any) -> None:
+        step_kind = type(step).__name__
+        logger.debug(
+            "agent_step kind=%s tokens_prompt=%s tokens_completion=%s",
+            step_kind,
+            usage.prompt,
+            usage.completion,
+        )
+
+    return step_callback
+
+
+def build_summarizer_agent(model: str, usage_sink: TokenUsage | None = None) -> Agent:
     """Construct the single-role summarizer Agent with the native LLM adapter.
 
     Tools (``GmailListByLabelTool`` / ``GmailGetMessageTool``) are
@@ -218,18 +298,23 @@ def build_summarizer_agent(model: str) -> Agent:
     appear tool-enabled while the surface silently no-ops. Re-add
     ``tools=[...]`` in the same pass that implements forwarding in the
     adapter.
+
+    When ``usage_sink`` is provided, the adapter feeds it per API call and
+    the Agent's ``step_callback`` logs the running totals per iteration.
     """
+    step_callback = _make_token_step_callback(usage_sink) if usage_sink is not None else None
     return Agent(
         role=_SUMMARIZER_ROLE,
         goal=_SUMMARIZER_GOAL,
         backstory=_SUMMARIZER_BACKSTORY,
-        llm=NativeAnthropicLLM(model=model),
+        llm=NativeAnthropicLLM(model=model, usage_sink=usage_sink),
         max_iter=_AGENT_MAX_ITER,
         max_execution_time=_AGENT_MAX_EXECUTION_TIME_SECONDS,
         memory=False,
         cache=False,
         allow_delegation=False,
         verbose=False,
+        step_callback=step_callback,
     )
 
 
@@ -277,6 +362,7 @@ class MailIngestorFlow(Flow[IngestState]):
         super().__init__()
         self._reader = reader
         self._model = model
+        self._token_usage = TokenUsage()
 
     @start()
     def fetch(self) -> RawMessage:
@@ -299,7 +385,11 @@ class MailIngestorFlow(Flow[IngestState]):
 
     @listen(parse)
     def summarize(self, parsed: EmailMessage) -> SummaryRecord:
-        agent = build_summarizer_agent(self._model)
+        # Per-message accumulator reset: token totals must not bleed between
+        # sequential kickoffs on the same Flow instance. The instance is
+        # reused for the length of one message; each `summarize` starts fresh.
+        self._token_usage.reset()
+        agent = build_summarizer_agent(self._model, usage_sink=self._token_usage)
         task = build_summarize_task(agent, parsed)
         crew = Crew(
             agents=[agent],
@@ -326,6 +416,8 @@ class MailIngestorFlow(Flow[IngestState]):
             subject=parsed.subject,
             summary=summary,
             model=self._model,
+            tokens_prompt=self._token_usage.prompt,
+            tokens_completion=self._token_usage.completion,
         )
         self.state.summary_record = record
         return record
