@@ -24,7 +24,13 @@ _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 
 
 class MissingSettingError(RuntimeError):
-    """Raised when a required environment variable is unset or blank."""
+    """Raised when a required environment variable is unset, blank, or invalid.
+
+    The name is a legacy from Task 1.4 when the class only covered the
+    unset case; ``LOG_LEVEL`` (Task 5.1) uses it for value validation
+    too. Kept as one class so callers only need one ``except`` clause
+    for all env-var-time failures.
+    """
 
 
 @dataclass(frozen=True, slots=True)

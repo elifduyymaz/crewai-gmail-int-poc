@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -54,6 +55,26 @@ def test_parser_rejects_label_and_demo_together() -> None:
         main_mod.build_parser().parse_args(["--label", "poc/reports", "--demo"])
 
 
+def test_parser_rejects_zero_limit() -> None:
+    with pytest.raises(SystemExit):
+        main_mod.build_parser().parse_args(["--label", "L", "--limit", "0"])
+
+
+def test_parser_rejects_negative_limit() -> None:
+    with pytest.raises(SystemExit):
+        main_mod.build_parser().parse_args(["--label", "L", "--limit", "-1"])
+
+
+def test_parser_rejects_non_integer_limit() -> None:
+    with pytest.raises(SystemExit):
+        main_mod.build_parser().parse_args(["--label", "L", "--limit", "abc"])
+
+
+def test_positive_int_validator_accepts_one() -> None:
+    # Guard the boundary: --limit 1 is the smallest legal value.
+    assert main_mod._positive_int("1") == 1
+
+
 def test_parser_accepts_auth_subcommand() -> None:
     args = main_mod.build_parser().parse_args(["auth"])
     assert args.command == "auth"
@@ -68,7 +89,10 @@ def test_main_without_mode_prints_usage_and_returns_2(capsys) -> None:
     rc = main_mod.main([])
     assert rc == 2
     err = capsys.readouterr().err
-    assert "--label" in err or "required" in err.lower()
+    # Both signals must be present so a regression that drops either the
+    # flag name or the "required" verb is caught.
+    assert "--label" in err
+    assert "required" in err.lower()
 
 
 def test_main_demo_returns_2_with_stub_message(capsys) -> None:
@@ -114,6 +138,63 @@ def test_bootstrap_sets_root_level_from_settings(monkeypatch) -> None:
     monkeypatch.setenv("LOG_LEVEL", "WARNING")
     main_mod._bootstrap()
     assert logging.getLogger().level == logging.WARNING
+
+
+def test_bootstrap_order_load_dotenv_then_telemetry_then_settings_then_logging(
+    monkeypatch,
+) -> None:
+    # Task 5.1 AC #3: bootstrap ORDER is load-bearing. Spy on each step
+    # so a refactor that swaps two calls (e.g. setting telemetry AFTER
+    # loading Settings, which could leak a crewai import) is caught.
+    calls: list[str] = []
+
+    def spy_load_dotenv(*_a, **_k) -> bool:
+        calls.append("load_dotenv")
+        return False
+
+    monkeypatch.setattr("dotenv.load_dotenv", spy_load_dotenv)
+
+    real_setdefault = os.environ.setdefault
+
+    def spy_setdefault(key: str, value: str) -> str:
+        if key == "CREWAI_TELEMETRY_OPT_OUT":
+            calls.append("telemetry_opt_out")
+        return real_setdefault(key, value)
+
+    monkeypatch.setattr(os.environ, "setdefault", spy_setdefault)
+
+    from mail_ingestor.config import Settings
+
+    real_from_env = Settings.from_env
+
+    def spy_from_env(**kwargs):
+        # Assert the environment invariant at the moment from_env is called.
+        assert os.environ.get("CREWAI_TELEMETRY_OPT_OUT") == "1", (
+            "CREWAI_TELEMETRY_OPT_OUT must be set BEFORE Settings.from_env "
+            "so any transitive crewai import cannot phone home."
+        )
+        calls.append("settings_from_env")
+        return real_from_env(**kwargs)
+
+    monkeypatch.setattr(Settings, "from_env", classmethod(lambda cls, **k: spy_from_env(**k)))
+
+    real_basicConfig = logging.basicConfig
+
+    def spy_basicConfig(*a, **k):
+        calls.append("basic_config")
+        return real_basicConfig(*a, **k)
+
+    monkeypatch.setattr(logging, "basicConfig", spy_basicConfig)
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    main_mod._bootstrap()
+
+    assert calls == [
+        "load_dotenv",
+        "telemetry_opt_out",
+        "settings_from_env",
+        "basic_config",
+    ]
 
 
 def test_bootstrap_missing_token_raises(monkeypatch) -> None:
@@ -229,6 +310,63 @@ def test_main_happy_path_stdout_never_carries_summary_body(monkeypatch, capsys) 
     assert "body_text" not in stdout
 
 
+def test_summary_completed_log_never_leaks_summary_or_subject_content(
+    monkeypatch, capsys, caplog
+) -> None:
+    # Adversarial pin: plant unmistakable sentinel strings into every
+    # SummaryRecord field that CAN carry sensitive content (subject,
+    # tl_dr, summary body, key_points) and verify none of them enter
+    # the `summary_completed` log line. Stdout DOES carry the full JSON
+    # (that's the record's contract), so we assert leaks only in the
+    # log stream, not stdout.
+    from datetime import UTC, datetime
+
+    from mail_ingestor.schemas import Summary, SummaryRecord
+
+    sentinels = {
+        "subject": "SENTINEL_SUBJECT_PII_leak_test",
+        "tl_dr": "SENTINEL_TLDR_secret_content",
+        "summary": "SENTINEL_SUMMARY_body_do_not_log",
+        "key_point": "SENTINEL_KEYPOINT_data",
+    }
+    sentinel_record = SummaryRecord(
+        source_message_id="m-sentinel",
+        subject=sentinels["subject"],
+        summary=Summary(
+            tl_dr=sentinels["tl_dr"],
+            summary=sentinels["summary"],
+            key_points=[sentinels["key_point"]],
+            action_items=[],
+            category="c",
+        ),
+        model="claude-x",
+        tokens_prompt=10,
+        tokens_completion=5,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    mocks = _wire_batch_mocks(monkeypatch, ["m-sentinel"])
+    mocks["flow"].kickoff.side_effect = [sentinel_record]
+
+    with caplog.at_level(logging.INFO, logger="mail_ingestor.main"):
+        main_mod.main(["--label", "L", "--limit", "1"])
+
+    completed = [r for r in caplog.records if "summary_completed" in r.getMessage()]
+    assert completed, "expected summary_completed log record"
+    log_line = completed[0].getMessage()
+    for name, value in sentinels.items():
+        assert value not in log_line, (
+            f"summary_completed log leaked {name} sentinel ({value!r}): {log_line!r}"
+        )
+
+    # And confirm the sentinels DID enter stdout as JSON payload — proves
+    # the record was actually processed (not silently dropped).
+    stdout = capsys.readouterr().out
+    for value in sentinels.values():
+        assert value in stdout
+
+
 def test_main_emits_summary_completed_log_per_message(monkeypatch, caplog) -> None:
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
     _wire_batch_mocks(monkeypatch, ["m1", "m2"])
@@ -310,6 +448,86 @@ def test_main_gmail_auth_error_returns_1(monkeypatch, capsys) -> None:
     err = capsys.readouterr().err
     assert "auth failed" in err.lower()
     assert "credentials.json" in err
+
+
+def test_main_refresh_error_returns_1_with_friendly_stderr(monkeypatch, capsys) -> None:
+    # RefreshError is a google.auth.exceptions.GoogleAuthError subclass —
+    # "bad OAuth" from the operator's viewpoint. Contract: stderr + exit 1,
+    # never a raw traceback.
+    from google.auth.exceptions import RefreshError
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+
+    def _refresh_fail() -> None:
+        raise RefreshError("token expired and refresh network unavailable")
+
+    monkeypatch.setattr(main_mod, "_build_gmail_client", _refresh_fail)
+
+    rc = main_mod.main(["--label", "L"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "google auth failed" in err.lower()
+    assert "RefreshError" in err
+
+
+def test_main_malformed_token_returns_1(monkeypatch, capsys) -> None:
+    # Credentials.from_authorized_user_file raises ValueError for a
+    # corrupt token JSON. Startup error → stderr + exit 1.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+
+    def _boom() -> None:
+        raise ValueError("malformed token.json: invalid JSON")
+
+    monkeypatch.setattr(main_mod, "_build_gmail_client", _boom)
+
+    rc = main_mod.main(["--label", "L"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "startup error" in err.lower()
+    assert "ValueError" in err
+
+
+def test_main_token_file_permission_error_returns_1(monkeypatch, capsys) -> None:
+    # PermissionError inherits from OSError; captured by the OSError arm
+    # of the startup try/except. Verifies the file-system class of
+    # bad-OAuth failures is friendly, not a traceback.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+
+    def _boom() -> None:
+        raise PermissionError(13, "Permission denied", "/root/token.json")
+
+    monkeypatch.setattr(main_mod, "_build_gmail_client", _boom)
+
+    rc = main_mod.main(["--label", "L"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "startup error" in err.lower()
+    assert "PermissionError" in err
+
+
+def test_main_sqlite_operational_error_returns_1(monkeypatch, capsys) -> None:
+    # init_db on a bad path (parent dir missing, read-only FS, disk full)
+    # raises sqlite3.OperationalError. Task 5.1 contract: startup errors
+    # never leak a raw traceback.
+    import sqlite3
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    _wire_batch_mocks(monkeypatch, ["m1"])
+
+    def _boom(*_a, **_k):
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr("mail_ingestor.persistence.db.init_db", _boom)
+
+    rc = main_mod.main(["--label", "L"])
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "sqlite bootstrap failed" in err.lower()
+    assert "unable to open database file" in err.lower()
 
 
 # ─────────────────────────────────────────────────────────────

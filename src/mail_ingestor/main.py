@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import sqlite3
 import sys
 import time
 from typing import TYPE_CHECKING, Any
@@ -40,6 +41,22 @@ _ERR_USAGE = 2
 # Canonical structured-log format for the root logger. Any change here
 # needs to update parsers or dashboards that consume the log stream.
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+
+
+def _positive_int(value: str) -> int:
+    """argparse ``type=`` for ``--limit``: rejects zero and negative values.
+
+    Without this, ``--limit -1`` and ``--limit 0`` were accepted, the reader
+    returned an empty list, and the run exited 0 as if the user had asked
+    for a legitimate empty batch — classic silent-success-on-garbage-input.
+    """
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected an integer, got {value!r}") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"--limit must be >= 1 (got {parsed})")
+    return parsed
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -77,9 +94,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--limit",
-        type=int,
+        type=_positive_int,
         default=5,
-        help="Maximum number of messages to process (default: 5).",
+        help="Maximum number of messages to process (default: 5, must be >= 1).",
     )
     return parser
 
@@ -103,6 +120,15 @@ def _bootstrap(*, load_dotenv_file: bool = True) -> Settings:
 
     settings = Settings.from_env(load_dotenv_file=False)
     _configure_logging(settings.log_level)
+    # Boot-complete sentinel so an operator can tell "bootstrap succeeded
+    # but the batch produced no output" from "bootstrap crashed". Never
+    # emits the auth token (Settings.__repr__ masks it via field(repr=False)).
+    logging.getLogger(__name__).info(
+        "boot_complete model=%s db=%s log_level=%s",
+        settings.llm_model,
+        settings.sqlite_db_path,
+        settings.log_level,
+    )
     return settings
 
 
@@ -178,14 +204,17 @@ def _process_one(
 def _run_batch(settings: Settings, label: str, limit: int) -> int:
     """Process the first ``limit`` messages under ``label``.
 
-    Startup errors (bad OAuth, unknown label) print to stderr and return
-    a config exit code. Per-message runtime errors propagate — Story 5.2
-    wraps this loop's inner call in a DLQ boundary.
+    Startup errors (bad OAuth, unknown label, DB open failure, malformed
+    token JSON, token-refresh network failure) print a friendly stderr
+    line and return :data:`_ERR_CONFIG`. Per-message runtime errors
+    propagate — Story 5.2 wraps the inner call in ``DlqWriter.capture``.
     """
     logger = logging.getLogger(__name__)
 
     # Deferred imports so any of these that transitively touches
     # ``crewai`` runs *after* CREWAI_TELEMETRY_OPT_OUT is set in _bootstrap.
+    from google.auth.exceptions import GoogleAuthError
+
     from mail_ingestor.flow import MailIngestorFlow
     from mail_ingestor.gmail.auth import GmailAuthError
     from mail_ingestor.gmail.labels import LabelNotFoundError, LabelResolver
@@ -194,27 +223,53 @@ def _run_batch(settings: Settings, label: str, limit: int) -> int:
     from mail_ingestor.persistence.writer import VaultWriter
     from mail_ingestor.telemetry import log_run_totals
 
+    # Everything before the per-message loop is "startup": prerequisites
+    # that must succeed before we can process a single message. A failure
+    # here is not a per-message concern → route to stderr + exit 1 per the
+    # Task 5.1 contract, don't leak a raw traceback.
+    #
+    # OSError covers FileNotFoundError / PermissionError on the token file.
+    # GoogleAuthError covers RefreshError / TransportError from google-auth.
+    # ValueError covers malformed token JSON in
+    # ``Credentials.from_authorized_user_file``.
+    # sqlite3.OperationalError covers disk-full / read-only FS / bad path
+    # at ``init_db``.
     try:
         gmail_client = _build_gmail_client()
-    except GmailAuthError as exc:
-        print(f"[mail-ingestor] Gmail auth failed: {exc}", file=sys.stderr)
-        return _ERR_CONFIG
-
-    resolver = LabelResolver(gmail_client)
-    reader = GmailReaderService(gmail_client)
-    try:
+        resolver = LabelResolver(gmail_client)
+        reader = GmailReaderService(gmail_client)
         label_id = resolver.resolve(label)
+        conn = init_db(settings.sqlite_db_path)
+        vault = VaultWriter(conn)
+        flow = MailIngestorFlow(reader=reader, model=settings.llm_model)
+        message_ids = reader.list_message_ids(label_id, max_results=limit)
     except LabelNotFoundError as exc:
         print(f"[mail-ingestor] {exc}", file=sys.stderr)
         return _ERR_CONFIG
+    except GmailAuthError as exc:
+        print(f"[mail-ingestor] Gmail auth failed: {exc}", file=sys.stderr)
+        return _ERR_CONFIG
+    except GoogleAuthError as exc:
+        print(
+            f"[mail-ingestor] Google auth failed ({type(exc).__name__}): {exc}",
+            file=sys.stderr,
+        )
+        return _ERR_CONFIG
+    except sqlite3.OperationalError as exc:
+        print(
+            f"[mail-ingestor] SQLite bootstrap failed at {settings.sqlite_db_path}: {exc}",
+            file=sys.stderr,
+        )
+        return _ERR_CONFIG
+    except (OSError, ValueError) as exc:
+        print(
+            f"[mail-ingestor] startup error ({type(exc).__name__}): {exc}",
+            file=sys.stderr,
+        )
+        return _ERR_CONFIG
 
-    message_ids = reader.list_message_ids(label_id, max_results=limit)
     if not message_ids:
         logger.info("no_messages label=%s limit=%d", label, limit)
-
-    conn = init_db(settings.sqlite_db_path)
-    vault = VaultWriter(conn)
-    flow = MailIngestorFlow(reader=reader, model=settings.llm_model)
 
     records: list[SummaryRecord] = []
     for message_id in message_ids:
