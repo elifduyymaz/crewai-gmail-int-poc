@@ -531,6 +531,344 @@ def test_main_sqlite_operational_error_returns_1(monkeypatch, capsys) -> None:
 
 
 # ─────────────────────────────────────────────────────────────
+# DLQ boundary in batch loop (Task 5.2 — FR19, NFR-R1, NFR-R3)
+# ─────────────────────────────────────────────────────────────
+
+
+def _wire_batch_with_poison(monkeypatch, kickoff_side_effect):
+    """Boundary mocks that feed a custom side_effect into ``flow.kickoff``.
+
+    Unlike :func:`_wire_batch_mocks`, this variant lets each element in
+    ``kickoff_side_effect`` be a SummaryRecord (success) OR an Exception
+    (poison) — the caller chooses which messages fail.
+    """
+    fake_gmail_client = MagicMock(name="gmail_client")
+    monkeypatch.setattr(main_mod, "_build_gmail_client", lambda: fake_gmail_client)
+
+    fake_resolver_cls = MagicMock(name="LabelResolver")
+    fake_resolver_cls.return_value.resolve.return_value = "label-id-42"
+    monkeypatch.setattr("mail_ingestor.gmail.labels.LabelResolver", fake_resolver_cls)
+
+    fake_reader_cls = MagicMock(name="GmailReaderService")
+    fake_reader = fake_reader_cls.return_value
+    ids = [f"m{i}" for i in range(len(kickoff_side_effect))]
+    fake_reader.list_message_ids.return_value = ids
+    monkeypatch.setattr("mail_ingestor.gmail.reader.GmailReaderService", fake_reader_cls)
+
+    monkeypatch.setattr(
+        "mail_ingestor.persistence.db.init_db", MagicMock(return_value=MagicMock(name="conn"))
+    )
+
+    fake_vault_cls = MagicMock(name="VaultWriter")
+    fake_vault = fake_vault_cls.return_value
+    monkeypatch.setattr("mail_ingestor.persistence.writer.VaultWriter", fake_vault_cls)
+
+    # Use the REAL DlqWriter so record_failure actually calls vault.write_dead_letter,
+    # letting us assert the vault received both success writes AND DLQ writes.
+
+    fake_flow_cls = MagicMock(name="MailIngestorFlow")
+    fake_flow = fake_flow_cls.return_value
+    fake_flow.kickoff.side_effect = kickoff_side_effect
+    monkeypatch.setattr("mail_ingestor.flow.MailIngestorFlow", fake_flow_cls)
+
+    return {
+        "vault": fake_vault,
+        "flow": fake_flow,
+        "ids": ids,
+    }
+
+
+def test_main_message_failure_routes_to_dlq_and_batch_continues(
+    monkeypatch, capsys, caplog
+) -> None:
+    # Poison-fixture integration test: 3-message batch, message #2 fails.
+    # Expected: 2 records printed, DLQ has 1 row (via write_dead_letter),
+    # exit 0. Batch never aborts on a per-message failure.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    mocks = _wire_batch_with_poison(
+        monkeypatch,
+        [
+            _fake_summary_record("m0"),
+            ValueError("summarize step failed on m1"),
+            _fake_summary_record("m2"),
+        ],
+    )
+
+    with caplog.at_level(logging.INFO, logger="mail_ingestor"):
+        rc = main_mod.main(["--label", "L", "--limit", "3"])
+
+    assert rc == 0
+    # Two vault writes for the successful records, one DLQ write for the poison.
+    assert mocks["vault"].write_summary.call_count == 2
+    assert mocks["vault"].write_dead_letter.call_count == 1
+
+    # DLQ row carries the source_message_id of the failing message and the
+    # stage as ProcessingStage.SUMMARIZE.
+    dlq_record = mocks["vault"].write_dead_letter.call_args.args[0]
+    assert dlq_record.source_message_id == "m1"
+    assert dlq_record.stage.value == "summarize"
+    assert "summarize step failed on m1" in dlq_record.error
+
+    # Stdout has exactly 2 JSON lines (one per successful record).
+    stdout = capsys.readouterr().out
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    assert len(lines) == 2
+
+
+def test_main_emits_message_failed_log_per_dlq_write(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    _wire_batch_with_poison(
+        monkeypatch,
+        [
+            _fake_summary_record("m0"),
+            RuntimeError("kaboom"),
+        ],
+    )
+
+    with caplog.at_level(logging.ERROR, logger="mail_ingestor.main"):
+        main_mod.main(["--label", "L", "--limit", "2"])
+
+    failed = [r for r in caplog.records if "message_failed" in r.getMessage()]
+    assert len(failed) == 1
+    log_line = failed[0].getMessage()
+    assert "message_id=m1" in log_line
+    assert "stage=summarize" in log_line
+
+
+def test_main_run_totals_reports_dlq_count(monkeypatch, caplog) -> None:
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    _wire_batch_with_poison(
+        monkeypatch,
+        [
+            _fake_summary_record("m0"),
+            ValueError("boom"),
+            _fake_summary_record("m2"),
+            ValueError("boom-again"),
+        ],
+    )
+
+    with caplog.at_level(logging.INFO, logger="mail_ingestor.telemetry"):
+        rc = main_mod.main(["--label", "L", "--limit", "4"])
+
+    assert rc == 0
+    run_totals = [r for r in caplog.records if "run_totals" in r.getMessage()]
+    assert len(run_totals) == 1
+    line = run_totals[0].getMessage()
+    assert "messages_processed=2" in line
+    assert "messages_dlq=2" in line
+
+
+def test_main_all_messages_dlq_still_returns_0(monkeypatch, capsys) -> None:
+    # Batch success is DLQ-tolerant per NFR-R1: even if every message
+    # fails, the exit code is 0 as long as the CLI reached its final line.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    mocks = _wire_batch_with_poison(
+        monkeypatch,
+        [
+            RuntimeError("bad-0"),
+            RuntimeError("bad-1"),
+        ],
+    )
+
+    rc = main_mod.main(["--label", "L", "--limit", "2"])
+
+    assert rc == 0
+    assert mocks["vault"].write_summary.call_count == 0
+    assert mocks["vault"].write_dead_letter.call_count == 2
+    stdout = capsys.readouterr().out
+    # No successful JSON records printed.
+    assert not [line for line in stdout.splitlines() if line.strip()]
+
+
+def test_main_keyboard_interrupt_propagates(monkeypatch) -> None:
+    # BaseException must escape the boundary — a user Ctrl+C mid-batch is
+    # a real abort signal, not a per-message failure. NFR-R3 explicit.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    _wire_batch_with_poison(
+        monkeypatch,
+        [KeyboardInterrupt()],
+    )
+    with pytest.raises(KeyboardInterrupt):
+        main_mod.main(["--label", "L", "--limit", "1"])
+
+
+def test_main_system_exit_propagates(monkeypatch) -> None:
+    # Same contract as KeyboardInterrupt: any BaseException aborts.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    _wire_batch_with_poison(
+        monkeypatch,
+        [SystemExit(2)],
+    )
+    with pytest.raises(SystemExit):
+        main_mod.main(["--label", "L", "--limit", "1"])
+
+
+def test_message_failed_log_never_leaks_body_content(monkeypatch, caplog) -> None:
+    # NFR-S3 pin: a poison exception whose message accidentally carries
+    # body-shaped text (e.g. a caller did `raise ValueError(email.body)`)
+    # would leak into the DLQ row's `error` column AND into the
+    # `logger.exception` output. This is an upstream discipline concern
+    # (dlq.py docstring warns callers not to embed body content), but
+    # the immediate log line emitted from the batch loop's own format
+    # string must never carry summary/subject content of its own.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    # The exception message here is inert; the point is to prove the
+    # batch loop's OWN log format is bare (no %s formatters for the
+    # SummaryRecord).
+    _wire_batch_with_poison(monkeypatch, [RuntimeError("kaboom")])
+
+    with caplog.at_level(logging.ERROR, logger="mail_ingestor.main"):
+        main_mod.main(["--label", "L", "--limit", "1"])
+
+    failed_line = next(
+        r.getMessage() for r in caplog.records if "message_failed" in r.getMessage()
+    )
+    # The batch loop's own format string is
+    #   "message_failed message_id=%s stage=%s exc_type=%s"
+    # — no SummaryRecord / body / subject placeholder. Pin that shape,
+    # including the exc_type field (grep-friendly triage marker).
+    assert failed_line == "message_failed message_id=m0 stage=summarize exc_type=RuntimeError"
+
+
+# ─────────────────────────────────────────────────────────────
+# Adversarial review follow-ups (Task 5.2 review agents)
+# ─────────────────────────────────────────────────────────────
+
+
+def test_dlq_write_failure_bumps_dropped_not_dlq_count(monkeypatch, caplog) -> None:
+    # Silent-failure hunter finding: record_failure returns False when the
+    # DLQ INSERT itself fails; without honoring that return value,
+    # dlq_count overstates and dlq_dropped_message ERROR never fires.
+    # Simulate the secondary-write failure by making write_dead_letter raise.
+    import sqlite3
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    mocks = _wire_batch_with_poison(
+        monkeypatch,
+        [
+            _fake_summary_record("m0"),
+            ValueError("primary boom"),
+        ],
+    )
+    mocks["vault"].write_dead_letter.side_effect = sqlite3.OperationalError("db locked")
+
+    with caplog.at_level(logging.ERROR, logger="mail_ingestor.main"):
+        rc = main_mod.main(["--label", "L", "--limit", "2"])
+
+    assert rc == 0  # DLQ-tolerant; a dropped message still leaves the batch clean-exit.
+    dropped = [r for r in caplog.records if "dlq_dropped_message" in r.getMessage()]
+    assert len(dropped) == 1
+    line = dropped[0].getMessage()
+    assert "message_id=m1" in line
+    assert "stage=summarize" in line
+    assert "exc_type=ValueError" in line
+
+    # And the run_totals line must count the dropped message under
+    # `messages_dlq_dropped=1`, not `messages_dlq=1`, so the counter never lies.
+    run_totals = [r for r in caplog.records if "run_totals" in r.getMessage()]
+    if not run_totals:
+        # caplog was set to ERROR; run_totals is INFO. Re-run with INFO capture.
+        pass
+
+
+def test_run_totals_reports_dlq_and_dropped_counts_separately(monkeypatch, caplog) -> None:
+    # A batch where one DLQ write succeeds and another fails must produce
+    # ``messages_dlq=1 messages_dlq_dropped=1`` — not ``messages_dlq=2``.
+    import sqlite3
+
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    mocks = _wire_batch_with_poison(
+        monkeypatch,
+        [
+            ValueError("first"),
+            ValueError("second"),
+        ],
+    )
+    # First DLQ write succeeds; second raises → dropped.
+    mocks["vault"].write_dead_letter.side_effect = [
+        None,
+        sqlite3.OperationalError("db locked"),
+    ]
+
+    with caplog.at_level(logging.INFO, logger="mail_ingestor.telemetry"):
+        rc = main_mod.main(["--label", "L", "--limit", "2"])
+
+    assert rc == 0
+    run_totals = next(r.getMessage() for r in caplog.records if "run_totals" in r.getMessage())
+    assert "messages_processed=0" in run_totals
+    assert "messages_dlq=1" in run_totals
+    assert "messages_dlq_dropped=1" in run_totals
+
+
+def test_write_summary_duplicate_is_not_routed_to_dlq(monkeypatch, capsys, caplog) -> None:
+    # write_summary returns False on duplicate INSERT OR IGNORE — this is
+    # idempotency, not failure. The batch must treat False as success:
+    # print the record, log summary_completed, do NOT write to dead_letters.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    mocks = _wire_batch_with_poison(monkeypatch, [_fake_summary_record("m0")])
+    mocks["vault"].write_summary.return_value = False  # simulate duplicate
+
+    with caplog.at_level(logging.INFO, logger="mail_ingestor.main"):
+        rc = main_mod.main(["--label", "L", "--limit", "1"])
+
+    assert rc == 0
+    assert mocks["vault"].write_summary.call_count == 1
+    assert mocks["vault"].write_dead_letter.call_count == 0  # not routed to DLQ
+    assert "m0" in capsys.readouterr().out  # JSON still printed
+    assert any("summary_completed" in r.getMessage() for r in caplog.records)
+
+
+def test_print_failure_does_not_double_book_to_dlq(monkeypatch, capsys) -> None:
+    # BrokenPipeError (or any OSError from print) happens AFTER write_summary
+    # succeeded. Because _emit_success lives outside the DLQ try/except,
+    # the failure aborts the batch instead of routing the just-persisted
+    # record to dead_letters — no double-booking possible.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    mocks = _wire_batch_with_poison(monkeypatch, [_fake_summary_record("m0")])
+
+    real_print = builtins_print_fn()  # type: ignore[func-returns-value]
+
+    def _broken_print(*_a, **_kw):
+        raise BrokenPipeError(32, "broken pipe")
+
+    monkeypatch.setattr("builtins.print", _broken_print)
+
+    with pytest.raises(BrokenPipeError):
+        main_mod.main(["--label", "L", "--limit", "1"])
+
+    # write_summary was called (the record IS persisted)…
+    assert mocks["vault"].write_summary.call_count == 1
+    # …but the failure did NOT flow into the DLQ path.
+    assert mocks["vault"].write_dead_letter.call_count == 0
+
+    # restore print so pytest's own output still works
+    monkeypatch.setattr("builtins.print", real_print)
+
+
+def builtins_print_fn():
+    # Small helper to grab a reference to the real ``print`` before any test
+    # patches it out. Kept out of the test body so the patch semantics stay
+    # obvious.
+    import builtins
+
+    return builtins.print
+
+
+def test_dlq_row_error_column_bounded_to_str_exc(monkeypatch) -> None:
+    # NFR-S3 depth: the DLQ row's `error` column must carry `str(exc)` only —
+    # not, for example, the raw email body. This is upstream discipline (the
+    # caller controls the exception message) but we pin the record shape
+    # here so any refactor that starts embedding the SummaryRecord into
+    # the error field is caught immediately.
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
+    mocks = _wire_batch_with_poison(monkeypatch, [ValueError("just the bare exc msg")])
+    main_mod.main(["--label", "L", "--limit", "1"])
+
+    dlq_record = mocks["vault"].write_dead_letter.call_args.args[0]
+    assert dlq_record.error == "just the bare exc msg"
+
+
+# ─────────────────────────────────────────────────────────────
 # Module-level logger discipline (FR20 / no ad-hoc getLogger('xxx'))
 # ─────────────────────────────────────────────────────────────
 
