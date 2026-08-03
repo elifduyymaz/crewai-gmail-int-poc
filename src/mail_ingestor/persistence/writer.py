@@ -2,16 +2,23 @@
 
 Framework-agnostic core — no CrewAI dependency. Persists ``SummaryRecord``
 idempotently (INSERT OR IGNORE on the unique ``source_message_id``) and
-``DeadLetterRecord`` (plain INSERT). The Summary is stored flattened; its
-list fields are JSON-encoded; datetimes are stored as ISO 8601 text.
+``DeadLetterRecord`` (plain INSERT with the captured traceback). The
+Summary is stored flattened; its list fields are JSON-encoded; datetimes
+are stored as ISO 8601 text.
+
+Reliability contract (never re-raise, secondary-exception isolation) is
+NOT here — it lives one layer up in ``dlq.py`` on top of this writer.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 
 from mail_ingestor.schemas import DeadLetterRecord, SummaryRecord
+
+logger = logging.getLogger(__name__)
 
 
 class VaultWriter:
@@ -24,7 +31,9 @@ class VaultWriter:
         """Insert a ``SummaryRecord`` idempotently.
 
         Returns True if a new row was inserted, False if a row with the same
-        ``source_message_id`` already existed (INSERT OR IGNORE).
+        ``source_message_id`` already existed (INSERT OR IGNORE). A duplicate
+        emits a ``summary_skipped_duplicate`` debug log with the message id
+        only — never the summary body.
         """
         summary = record.summary
         with self._conn:
@@ -45,18 +54,26 @@ class VaultWriter:
                     record.created_at.isoformat(),
                 ),
             )
-        return cursor.rowcount == 1
+        inserted = cursor.rowcount == 1
+        if not inserted:
+            logger.debug(
+                "summary_skipped_duplicate source_message_id=%s",
+                record.source_message_id,
+            )
+        return inserted
 
     def write_dead_letter(self, record: DeadLetterRecord) -> int:
         """Insert a ``DeadLetterRecord`` (always) and return the new row id."""
         with self._conn:
             cursor = self._conn.execute(
-                "INSERT INTO dead_letters (source_message_id, stage, error, failed_at) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO dead_letters "
+                "(source_message_id, stage, error, traceback, failed_at) "
+                "VALUES (?, ?, ?, ?, ?)",
                 (
                     record.source_message_id,
                     record.stage.value,
                     record.error,
+                    record.traceback,
                     record.failed_at.isoformat(),
                 ),
             )

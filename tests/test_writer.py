@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import UTC, datetime
 
 from mail_ingestor.persistence.db import init_db
@@ -78,6 +79,34 @@ def test_write_summary_duplicate_is_ignored():
     assert rows[0]["subject"] == "Subj"  # original kept, not overwritten
 
 
+def test_write_summary_duplicate_emits_debug_log_without_body(caplog):
+    writer = _writer()
+    writer.write_summary(_summary_record("dup"))
+    with caplog.at_level(logging.DEBUG, logger="mail_ingestor.persistence.writer"):
+        writer.write_summary(_summary_record("dup"))
+    matching = [r for r in caplog.records if "summary_skipped_duplicate" in r.getMessage()]
+    assert matching, "expected a summary_skipped_duplicate debug record"
+    message = matching[0].getMessage()
+    assert "source_message_id=dup" in message
+    assert "the summary body" not in message  # never leak summary content
+    assert "tldr" not in message
+
+
+def test_double_run_five_messages_yields_five_rows_not_ten():
+    # Empirical probe for CrewAI Issue #5802 at PoC scale: replaying the same
+    # 5-message batch must not double the vault row count. See findings.md.
+    writer = _writer()
+    ids = [f"msg-{i}" for i in range(5)]
+    for message_id in ids:
+        assert writer.write_summary(_summary_record(message_id)) is True
+
+    for message_id in ids:
+        assert writer.write_summary(_summary_record(message_id)) is False
+
+    count = writer._conn.execute("SELECT COUNT(*) FROM summary_records").fetchone()[0]
+    assert count == 5
+
+
 def test_write_dead_letter_inserts_and_returns_rowid():
     writer = _writer()
     rowid = writer.write_dead_letter(
@@ -94,6 +123,31 @@ def test_write_dead_letter_inserts_and_returns_rowid():
     assert row["stage"] == "summarize"
     assert row["error"] == "boom"
     assert row["failed_at"] == AWARE.isoformat()
+
+
+def test_write_dead_letter_persists_traceback():
+    writer = _writer()
+    tb = 'Traceback (most recent call last):\n  File "x", line 1, in y\nValueError: boom\n'
+    writer.write_dead_letter(
+        DeadLetterRecord(
+            source_message_id="m9",
+            stage=ProcessingStage.PARSE,
+            error="ValueError: boom",
+            traceback=tb,
+            failed_at=AWARE,
+        )
+    )
+    row = writer._conn.execute("SELECT traceback FROM dead_letters").fetchone()
+    assert row["traceback"] == tb
+
+
+def test_write_dead_letter_traceback_omitted_defaults_empty():
+    writer = _writer()
+    writer.write_dead_letter(
+        DeadLetterRecord(stage=ProcessingStage.READ, error="e", failed_at=AWARE)
+    )
+    row = writer._conn.execute("SELECT traceback FROM dead_letters").fetchone()
+    assert row["traceback"] == ""
 
 
 def test_write_dead_letter_allows_duplicates_and_null_source():
