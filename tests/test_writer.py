@@ -1,6 +1,9 @@
 import json
 import logging
 from datetime import UTC, datetime
+from unittest.mock import MagicMock
+
+import pytest
 
 from mail_ingestor.persistence.db import init_db
 from mail_ingestor.persistence.writer import VaultWriter
@@ -161,3 +164,20 @@ def test_write_dead_letter_allows_duplicates_and_null_source():
     rows = writer._conn.execute("SELECT source_message_id FROM dead_letters").fetchall()
     assert len(rows) == 2
     assert all(r["source_message_id"] is None for r in rows)
+
+
+def test_write_dead_letter_raises_when_driver_returns_no_rowid():
+    # Guards writer.py's `rowid is None` branch: a plain INSERT that reports
+    # no lastrowid is a driver-level anomaly that must fail loud so the
+    # outer DlqWriter contract logs it, not be masked by int(None).
+    fake_cursor = MagicMock()
+    fake_cursor.lastrowid = None
+    fake_conn = MagicMock()
+    fake_conn.execute.return_value = fake_cursor
+    fake_conn.__enter__.return_value = fake_conn
+    fake_conn.__exit__.return_value = False
+    writer = VaultWriter(fake_conn)
+    with pytest.raises(RuntimeError, match="dead_letters INSERT returned no rowid"):
+        writer.write_dead_letter(
+            DeadLetterRecord(stage=ProcessingStage.READ, error="e", failed_at=AWARE)
+        )

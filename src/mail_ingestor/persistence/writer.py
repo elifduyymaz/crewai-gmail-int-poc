@@ -77,4 +77,11 @@ class VaultWriter:
                     record.failed_at.isoformat(),
                 ),
             )
-        return int(cursor.lastrowid)
+        rowid = cursor.lastrowid
+        if rowid is None:
+            # Plain INSERT (no OR IGNORE) sets lastrowid on success; a None
+            # here means the driver reported neither success nor a raised
+            # error. Fail loud so DlqWriter's outer contract logs it rather
+            # than silently returning a bogus id to the caller.
+            raise RuntimeError("dead_letters INSERT returned no rowid")
+        return rowid
