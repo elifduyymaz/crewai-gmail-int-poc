@@ -70,3 +70,40 @@ def test_capture_does_not_swallow_base_exception():
     with pytest.raises(KeyboardInterrupt), dlq.capture(ProcessingStage.READ):
         raise KeyboardInterrupt
     assert _dead_letters(conn) == []
+
+
+def test_capture_persists_traceback():
+    dlq, conn = _dlq()
+    with dlq.capture(ProcessingStage.PARSE, source_message_id="m3"):
+        raise ValueError("kaboom")
+    row = _dead_letters(conn)[0]
+    tb = row["traceback"]
+    assert "Traceback" in tb
+    assert "ValueError: kaboom" in tb
+    assert "test_capture_persists_traceback" in tb
+
+
+def test_record_failure_captures_traceback_from_active_except():
+    dlq, conn = _dlq()
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError as exc:
+        dlq.record_failure(ProcessingStage.SUMMARIZE, exc, source_message_id="m4")
+    tb = _dead_letters(conn)[0]["traceback"]
+    assert "Traceback" in tb
+    assert "RuntimeError: boom" in tb
+
+
+def test_record_failure_no_trace_when_called_outside_except():
+    dlq, conn = _dlq()
+    dlq.record_failure(ProcessingStage.PERSIST, "explicit string", source_message_id="m5")
+    assert _dead_letters(conn)[0]["traceback"] == ""
+
+
+def test_record_failure_explicit_tb_overrides_capture():
+    dlq, conn = _dlq()
+    try:
+        raise RuntimeError("boom")
+    except RuntimeError as exc:
+        dlq.record_failure(ProcessingStage.READ, exc, tb="explicit-override")
+    assert _dead_letters(conn)[0]["traceback"] == "explicit-override"
