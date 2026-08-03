@@ -206,8 +206,10 @@ def _run_batch(settings: Settings, label: str, limit: int) -> int:
 
     Startup errors (bad OAuth, unknown label, DB open failure, malformed
     token JSON, token-refresh network failure) print a friendly stderr
-    line and return :data:`_ERR_CONFIG`. Per-message runtime errors
-    propagate — Story 5.2 wraps the inner call in ``DlqWriter.capture``.
+    line and return :data:`_ERR_CONFIG`. Per-message runtime errors are
+    routed to the DLQ via ``DlqWriter.record_failure`` — the batch never
+    aborts on a single-message failure and exit code 0 is DLQ-tolerant
+    (FR19, NFR-R1, NFR-R3).
     """
     logger = logging.getLogger(__name__)
 
@@ -220,7 +222,9 @@ def _run_batch(settings: Settings, label: str, limit: int) -> int:
     from mail_ingestor.gmail.labels import LabelNotFoundError, LabelResolver
     from mail_ingestor.gmail.reader import GmailReaderService
     from mail_ingestor.persistence.db import init_db
+    from mail_ingestor.persistence.dlq import DlqWriter
     from mail_ingestor.persistence.writer import VaultWriter
+    from mail_ingestor.schemas import ProcessingStage
     from mail_ingestor.telemetry import log_run_totals
 
     # Everything before the per-message loop is "startup": prerequisites
@@ -271,11 +275,35 @@ def _run_batch(settings: Settings, label: str, limit: int) -> int:
     if not message_ids:
         logger.info("no_messages label=%s limit=%d", label, limit)
 
+    dlq = DlqWriter(vault)
     records: list[SummaryRecord] = []
+    dlq_count = 0
     for message_id in message_ids:
-        records.append(_process_one(flow, vault, message_id, logger))
+        # ``except Exception`` (NOT ``BaseException``) so KeyboardInterrupt /
+        # SystemExit propagate — the reliability boundary is per-message
+        # only, not "swallow everything." Per Task 5.2 AC + NFR-R3.
+        try:
+            records.append(_process_one(flow, vault, message_id, logger))
+        except Exception as exc:
+            # ``record_failure`` auto-captures ``traceback.format_exc()``
+            # from this active except frame — no need to pass tb explicitly.
+            dlq.record_failure(
+                ProcessingStage.SUMMARIZE,
+                exc,
+                source_message_id=message_id,
+            )
+            dlq_count += 1
+            # ``logger.exception`` includes the traceback; the summary body
+            # is not part of the exception object (Task 5.2 no-body-leak).
+            logger.exception(
+                "message_failed message_id=%s stage=%s",
+                message_id,
+                ProcessingStage.SUMMARIZE.value,
+            )
 
-    log_run_totals(records)
+    log_run_totals(records, dead_letter_count=dlq_count)
+    # Exit 0 is DLQ-tolerant: a batch with DLQ rows is still a valid
+    # completion — the reliability contract says the batch never aborts.
     return 0
 
 

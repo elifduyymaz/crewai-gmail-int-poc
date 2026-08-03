@@ -24,13 +24,24 @@ from mail_ingestor.schemas import SummaryRecord
 logger = logging.getLogger(__name__)
 
 
-def log_run_totals(records: Iterable[SummaryRecord]) -> None:
-    """Emit ``run_totals messages_processed=N tokens_prompt_sum=X tokens_completion_sum=Y``.
+def log_run_totals(
+    records: Iterable[SummaryRecord],
+    *,
+    dead_letter_count: int = 0,
+) -> None:
+    """Emit the end-of-batch summary line.
 
-    The sums are the best-effort accumulation of the records' per-message
-    token totals. ``None`` sums propagate to the log line verbatim (as
-    the literal string ``None``) so a reader can tell "usage was never
-    observed" from "usage was observed and summed to 0".
+    Format::
+
+        run_totals messages_processed=N messages_dlq=M
+                   tokens_prompt_sum=X tokens_completion_sum=Y
+
+    ``messages_processed`` counts records that reached the vault; DLQ'd
+    messages travel through ``dead_letter_count`` instead, so the two
+    counters never double-count. Token sums are the best-effort
+    accumulation of the records' per-message totals; ``None`` propagates
+    verbatim so a reader can tell "usage was never observed" from
+    "usage was observed and summed to 0".
     """
     processed = 0
     prompt_sum: int | None = None
@@ -42,8 +53,10 @@ def log_run_totals(records: Iterable[SummaryRecord]) -> None:
         if record.tokens_completion is not None:
             completion_sum = (completion_sum or 0) + record.tokens_completion
     logger.info(
-        "run_totals messages_processed=%d tokens_prompt_sum=%s tokens_completion_sum=%s",
+        "run_totals messages_processed=%d messages_dlq=%d "
+        "tokens_prompt_sum=%s tokens_completion_sum=%s",
         processed,
+        dead_letter_count,
         prompt_sum,
         completion_sum,
     )
