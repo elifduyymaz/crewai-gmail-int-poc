@@ -90,9 +90,14 @@ class ProcessingStage(str, Enum):
 
 
 class DeadLetterRecord(_StrictModel):
-    """Failure boundary: a message that could not be processed."""
+    """Failure boundary: a message that could not be processed.
+
+    ``traceback`` carries ``traceback.format_exc()`` captured at the outer
+    boundary; empty when no active exception context was available.
+    """
 
     source_message_id: str | None = None
     stage: ProcessingStage
     error: str = Field(min_length=1)
+    traceback: str = ""
     failed_at: AwareDatetime = Field(default_factory=_utcnow)
