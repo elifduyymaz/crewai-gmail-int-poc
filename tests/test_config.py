@@ -5,6 +5,7 @@ import pytest
 
 from mail_ingestor.config import (
     DEFAULT_LLM_MODEL,
+    DEFAULT_LOG_LEVEL,
     DEFAULT_SQLITE_DB_PATH,
     MissingSettingError,
     Settings,
@@ -75,3 +76,28 @@ def test_from_env_honors_sqlite_db_path_override(monkeypatch):
     monkeypatch.setenv("SQLITE_DB_PATH", "/tmp/other-vault.db")
     settings = Settings.from_env(load_dotenv_file=False)
     assert settings.sqlite_db_path == Path("/tmp/other-vault.db")
+
+
+def test_default_log_level_constant():
+    assert DEFAULT_LOG_LEVEL == "INFO"
+
+
+def test_from_env_uses_default_log_level(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test-123")
+    monkeypatch.delenv("LOG_LEVEL", raising=False)
+    settings = Settings.from_env(load_dotenv_file=False)
+    assert settings.log_level == "INFO"
+
+
+def test_from_env_honors_log_level_override(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test-123")
+    monkeypatch.setenv("LOG_LEVEL", "debug")  # case-insensitive
+    settings = Settings.from_env(load_dotenv_file=False)
+    assert settings.log_level == "DEBUG"
+
+
+def test_from_env_rejects_invalid_log_level(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test-123")
+    monkeypatch.setenv("LOG_LEVEL", "VERBOSE")  # not a stdlib logging level
+    with pytest.raises(MissingSettingError, match="LOG_LEVEL"):
+        Settings.from_env(load_dotenv_file=False)
