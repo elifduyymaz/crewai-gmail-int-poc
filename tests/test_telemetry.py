@@ -157,3 +157,36 @@ def test_log_run_totals_dlq_only_batch(caplog):
     assert "messages_dlq=5" in message
     assert "tokens_prompt_sum=None" in message
     assert "tokens_completion_sum=None" in message
+
+
+def test_log_run_totals_default_dropped_count_is_zero(caplog):
+    # Backward-compat: legacy callers that don't pass dropped_count still
+    # produce a well-formed line with messages_dlq_dropped=0.
+    with caplog.at_level(logging.INFO, logger="mail_ingestor.telemetry"):
+        log_run_totals([_record("m1", tokens_prompt=10, tokens_completion=5)])
+    message = _run_totals_record(caplog).getMessage()
+    assert "messages_dlq_dropped=0" in message
+
+
+def test_log_run_totals_includes_dropped_count_kwarg(caplog):
+    # A dropped_count of N means "N messages were meant to be DLQ'd but
+    # the DLQ INSERT itself failed" — they are TRULY lost. The counter
+    # must be surfaced so oncall can reconcile.
+    records = [_record("m1", tokens_prompt=100, tokens_completion=30)]
+    with caplog.at_level(logging.INFO, logger="mail_ingestor.telemetry"):
+        log_run_totals(records, dead_letter_count=1, dropped_count=2)
+    message = _run_totals_record(caplog).getMessage()
+    assert "messages_processed=1" in message
+    assert "messages_dlq=1" in message
+    assert "messages_dlq_dropped=2" in message
+
+
+def test_log_run_totals_dropped_and_dlq_are_independent_counters(caplog):
+    # messages_dlq and messages_dlq_dropped never overlap. The two counters
+    # partition the failure set: dlq = landed durably, dropped = never landed.
+    with caplog.at_level(logging.INFO, logger="mail_ingestor.telemetry"):
+        log_run_totals([], dead_letter_count=3, dropped_count=2)
+    message = _run_totals_record(caplog).getMessage()
+    assert "messages_processed=0" in message
+    assert "messages_dlq=3" in message
+    assert "messages_dlq_dropped=2" in message

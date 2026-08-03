@@ -179,16 +179,35 @@ def _process_one(
     flow: Any,
     vault: Any,
     message_id: str,
-    logger: logging.Logger,
 ) -> SummaryRecord:
-    """Run the flow for one message, write the record, emit success log/stdout.
+    """Run the flow for one message and persist the record.
 
-    Returns the SummaryRecord. A per-message exception aborts the batch —
-    Story 5.2 replaces this call site with a ``DlqWriter.capture`` block.
+    Kept strictly to the *fallible-and-DLQ-worthy* work: kickoff and
+    vault write. Success-side I/O (JSON stdout emit, structured log) is
+    the caller's job via :func:`_emit_success` so a broken pipe or a
+    logging handler failure at emit-time does not cause a message to be
+    double-booked — persisted to ``summary_records`` AND routed to
+    ``dead_letters`` in the same iteration.
     """
-    started_ns = time.monotonic_ns()
     record = flow.kickoff(inputs={"message_id": message_id})
     vault.write_summary(record)
+    return record  # type: ignore[no-any-return]
+
+
+def _emit_success(
+    record: SummaryRecord,
+    logger: logging.Logger,
+    started_ns: int,
+) -> None:
+    """Print the record as JSON and log the ``summary_completed`` line.
+
+    Deliberately outside the DLQ boundary. A ``BrokenPipeError`` here
+    aborts the batch (correct: without stdout there is no point
+    continuing) rather than causing a double-book. Callers pass their
+    own ``started_ns`` from ``time.monotonic_ns()`` at loop head so
+    ``duration_ms`` covers kickoff+write+emit — the observable
+    end-to-end latency oncall cares about.
+    """
     print(record.model_dump_json())
     duration_ms = (time.monotonic_ns() - started_ns) // 1_000_000
     logger.info(
@@ -198,7 +217,6 @@ def _process_one(
         record.tokens_completion,
         duration_ms,
     )
-    return record  # type: ignore[no-any-return]
 
 
 def _run_batch(settings: Settings, label: str, limit: int) -> int:
@@ -278,30 +296,57 @@ def _run_batch(settings: Settings, label: str, limit: int) -> int:
     dlq = DlqWriter(vault)
     records: list[SummaryRecord] = []
     dlq_count = 0
+    dropped_count = 0
     for message_id in message_ids:
         # ``except Exception`` (NOT ``BaseException``) so KeyboardInterrupt /
         # SystemExit propagate — the reliability boundary is per-message
         # only, not "swallow everything." Per Task 5.2 AC + NFR-R3.
+        started_ns = time.monotonic_ns()
         try:
-            records.append(_process_one(flow, vault, message_id, logger))
+            record = _process_one(flow, vault, message_id)
         except Exception as exc:
             # ``record_failure`` auto-captures ``traceback.format_exc()``
             # from this active except frame — no need to pass tb explicitly.
-            dlq.record_failure(
+            # Its return value tells us whether the DLQ write itself
+            # succeeded: True => durable row exists, False => the
+            # secondary-exception isolation fired and the message is truly
+            # lost. Only durable rows count against ``dlq_count``; lost
+            # messages get a distinct ERROR log AND a separate counter so
+            # ``run_totals`` never overstates the DLQ tally.
+            recorded = dlq.record_failure(
                 ProcessingStage.SUMMARIZE,
                 exc,
                 source_message_id=message_id,
             )
-            dlq_count += 1
+            if recorded:
+                dlq_count += 1
+            else:
+                dropped_count += 1
+                logger.error(
+                    "dlq_dropped_message message_id=%s stage=%s exc_type=%s",
+                    message_id,
+                    ProcessingStage.SUMMARIZE.value,
+                    type(exc).__name__,
+                )
             # ``logger.exception`` includes the traceback; the summary body
-            # is not part of the exception object (Task 5.2 no-body-leak).
+            # is not part of the exception object (NFR-S3). Adding
+            # ``exc_type`` makes the line grep-friendly without waiting on
+            # the traceback that follows.
             logger.exception(
-                "message_failed message_id=%s stage=%s",
+                "message_failed message_id=%s stage=%s exc_type=%s",
                 message_id,
                 ProcessingStage.SUMMARIZE.value,
+                type(exc).__name__,
             )
+            continue
 
-    log_run_totals(records, dead_letter_count=dlq_count)
+        # Success emit is OUTSIDE the DLQ boundary. A print / log failure
+        # here means stdout is dead (BrokenPipeError, pipe closed) — the
+        # right thing is to abort the batch, not double-book to DLQ.
+        _emit_success(record, logger, started_ns)
+        records.append(record)
+
+    log_run_totals(records, dead_letter_count=dlq_count, dropped_count=dropped_count)
     # Exit 0 is DLQ-tolerant: a batch with DLQ rows is still a valid
     # completion — the reliability contract says the batch never aborts.
     return 0
