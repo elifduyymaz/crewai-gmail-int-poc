@@ -135,6 +135,34 @@ def test_main_demo_missing_fixtures_dir_returns_1_with_friendly_stderr(
     assert "nowhere" in err
 
 
+def test_main_demo_end_to_end_produces_expected_output(monkeypatch, tmp_path) -> None:
+    # Full-stack integration: argparse → _run_demo → run_demo_batch →
+    # CrewAI Flow → mocked LLM → SummaryRecord → file write. Previous
+    # dispatch test stubbed run_demo_batch so the real path was never
+    # exercised via main(). Only _DEMO_OUTPUT_DIR is monkeypatched to
+    # avoid clobbering the committed demo/ artifact.
+    from mail_ingestor.schemas import SummaryRecord
+
+    fresh_out = tmp_path / "demo_out"
+    monkeypatch.setattr(main_mod, "_DEMO_OUTPUT_DIR", fresh_out)
+
+    rc = main_mod.main(["--demo"])
+
+    assert rc == 0
+    samples = sorted(fresh_out.glob("*_sample.json"))
+    assert [p.name for p in samples] == [
+        "001_sample.json",
+        "002_sample.json",
+        "003_sample.json",
+        "004_sample.json",
+        "005_sample.json",
+    ]
+    for sample in samples:
+        record = SummaryRecord.model_validate_json(sample.read_text(encoding="utf-8"))
+        assert record.source_message_id.startswith("demo-msg-")
+        assert record.model == "claude-demo-offline"
+
+
 # ─────────────────────────────────────────────────────────────
 # Bootstrap order
 # ─────────────────────────────────────────────────────────────

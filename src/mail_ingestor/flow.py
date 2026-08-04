@@ -36,7 +36,7 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 from mail_ingestor.gmail.parser import parse_gmail_message
-from mail_ingestor.gmail.reader import GmailReaderService
+from mail_ingestor.gmail.reader import MessageReader
 from mail_ingestor.llm import get_llm_client
 from mail_ingestor.schemas import (
     EmailMessage,
@@ -356,7 +356,7 @@ class MailIngestorFlow(Flow[IngestState]):
 
     def __init__(
         self,
-        reader: GmailReaderService,
+        reader: MessageReader,
         model: str,
     ) -> None:
         super().__init__()

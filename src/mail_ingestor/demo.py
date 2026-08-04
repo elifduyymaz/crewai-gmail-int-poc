@@ -220,11 +220,11 @@ def run_demo_batch(
     # must load AFTER CREWAI_TELEMETRY_OPT_OUT is set (top of this file).
     from mail_ingestor.flow import MailIngestorFlow, NativeAnthropicLLM
 
+    # ``_DemoGmailReader`` satisfies the structural ``MessageReader``
+    # Protocol declared in ``gmail/reader.py`` — mypy accepts it without
+    # a subclass relationship and no ``type: ignore`` is needed.
     reader = _DemoGmailReader({r.message_id: r.payload for r in raw_messages})
-    # ``reader`` is a duck-typed stand-in; MailIngestorFlow only calls
-    # ``reader.get_message``. A Protocol on GmailReaderService is a
-    # separate cleanup — for now, silence the type check narrowly.
-    flow = MailIngestorFlow(reader=reader, model=model)  # type: ignore[arg-type]
+    flow = MailIngestorFlow(reader=reader, model=model)
 
     logger.info(
         "demo_starting fixtures_dir=%s output_dir=%s fixture_count=%d",

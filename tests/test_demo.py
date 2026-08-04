@@ -396,3 +396,63 @@ def test_committed_demo_samples_match_a_fresh_run(tmp_path: Path) -> None:
             f"committed {committed.name} is stale; regenerate via "
             f"`python -m mail_ingestor.main --demo` and commit the result."
         )
+
+
+def test_run_demo_batch_preserves_all_summary_fields_from_canned_response(
+    tmp_path: Path,
+) -> None:
+    # AC #4 depth: not just source_message_id + model, but the full
+    # Summary payload (tl_dr, summary, key_points, action_items,
+    # category) must round-trip from llm_responses.json → mocked LLM
+    # → CrewAI parse → SummaryRecord.summary. A regression where the
+    # flow swallows the LLM output and emits an empty summary would
+    # previously pass the shape-only test.
+    output_dir = tmp_path / "out"
+    run_demo_batch(_FIXTURES_DIR, output_dir)
+
+    responses = load_demo_llm_responses(_FIXTURES_DIR / "llm_responses.json")
+    for sample_path in sorted(output_dir.glob("*_sample.json")):
+        record = SummaryRecord.model_validate_json(sample_path.read_text(encoding="utf-8"))
+        expected = responses[record.source_message_id]
+        assert record.summary.tl_dr == expected["tl_dr"]
+        assert record.summary.summary == expected["summary"]
+        assert record.summary.key_points == expected["key_points"]
+        assert record.summary.action_items == expected["action_items"]
+        assert record.summary.category == expected["category"]
+
+
+def test_run_demo_batch_restores_native_anthropic_llm_call_after_completion(
+    tmp_path: Path,
+) -> None:
+    # patch.object's __exit__ must return NativeAnthropicLLM.call to the
+    # original implementation. A refactor that swaps to a raw setattr
+    # without a finally would leave the mock leaked into subsequent
+    # non-demo runs (tests + real CLI) — a silent-failure surface that
+    # would only surface as strange behavior far from the demo path.
+    from mail_ingestor.flow import NativeAnthropicLLM
+
+    original = NativeAnthropicLLM.call
+    run_demo_batch(_FIXTURES_DIR, tmp_path / "out")
+    assert NativeAnthropicLLM.call is original
+
+
+def test_demo_llm_call_json_dumps_non_dict_canned_response(monkeypatch) -> None:
+    # Boundary: json.dumps accepts any JSON-serializable value, so a
+    # rogue list-shaped entry produces "[]" — the failure then surfaces
+    # inside CrewAI's Pydantic parse as a clear ValidationError. Verify
+    # our mock does not add its own type check that would obscure the
+    # real failure site.
+    monkeypatch.setattr(demo_mod, "_DEMO_CURRENT_MESSAGE_ID", "any-id")
+    monkeypatch.setattr(demo_mod, "_DEMO_RESPONSES", {"any-id": []})
+    assert demo_mod._demo_llm_call(object(), "prompt") == "[]"
+
+
+def test_demo_gmail_reader_satisfies_message_reader_protocol() -> None:
+    # Structural typing pin: _DemoGmailReader must remain a valid
+    # MessageReader so mypy accepts it without a type: ignore. A
+    # refactor that renames or removes get_message would trip this
+    # runtime check.
+    from mail_ingestor.gmail.reader import MessageReader
+
+    reader = demo_mod._DemoGmailReader({"m1": {"payload": {}}})
+    assert isinstance(reader, MessageReader)
