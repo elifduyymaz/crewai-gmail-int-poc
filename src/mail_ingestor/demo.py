@@ -78,7 +78,12 @@ def _iter_email_paths(fixtures_dir: Path) -> Iterator[Path]:
 def iter_demo_messages(fixtures_dir: Path) -> Iterator[RawMessage]:
     """Yield a :class:`RawMessage` per non-poison email JSON in ``fixtures_dir``."""
     for path in _iter_email_paths(fixtures_dir):
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        # Wrap json.loads to attach fixture path context — a malformed
+        # fixture must not surface as a bare "line 7 column 3" error.
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}: invalid JSON: {exc}") from exc
         message_id = payload.get("id")
         if not message_id:
             raise ValueError(f"{path}: fixture missing top-level 'id' field")
@@ -87,7 +92,10 @@ def iter_demo_messages(fixtures_dir: Path) -> Iterator[RawMessage]:
 
 def load_demo_llm_responses(path: Path) -> dict[str, dict[str, Any]]:
     """Load ``llm_responses.json`` into a ``{message_id: summary_dict}`` map."""
-    parsed = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{path}: invalid JSON: {exc}") from exc
     if not isinstance(parsed, dict):
         raise TypeError(
             f"{path}: expected a top-level JSON object, got {type(parsed).__name__}"
@@ -130,7 +138,14 @@ class _DemoGmailReader:
         self._messages = messages
 
     def get_message(self, message_id: str) -> dict[str, Any]:
-        return self._messages[message_id]
+        try:
+            return self._messages[message_id]
+        except KeyError as exc:
+            # Wrap so a Gmail-style traceback does not hide the fact that
+            # we are inside the demo reader with a fixed fixture set.
+            raise KeyError(
+                f"demo reader has no fixture for message_id={message_id!r}"
+            ) from exc
 
 
 def run_demo_batch(
@@ -148,13 +163,58 @@ def run_demo_batch(
     exception raised inside the flow (demo mode has no DLQ boundary —
     a fixture failure is a bug in the fixture set, not a runtime
     concern to swallow).
+
+    Startup contract (all validated **before** any I/O):
+
+    * The fixtures directory must be a real directory.
+    * At least one non-poison email fixture must exist.
+    * Every fixture's ``message_id`` must have a matching key in
+      ``llm_responses.json`` — a partial responses map would otherwise
+      let the batch write ``001..N-1_sample.json`` and only crash on
+      the missing entry, leaving stale files behind.
+
+    Startup guarantees (before any ``flow.kickoff`` fires):
+
+    * The output directory is created and any pre-existing
+      ``*_sample.json`` files are removed. A shrinking fixture set
+      leaves no orphan.
+
+    Cleanup:
+
+    * ``_DEMO_RESPONSES`` is cleared in a ``finally`` — no cross-run
+      global-state carryover.
     """
     global _DEMO_CURRENT_MESSAGE_ID, _DEMO_RESPONSES
 
+    if not fixtures_dir.is_dir():
+        raise FileNotFoundError(
+            f"demo fixtures directory not found: {fixtures_dir}"
+        )
+
     _DEMO_RESPONSES = load_demo_llm_responses(fixtures_dir / _LLM_RESPONSES_FILENAME)
     raw_messages = list(iter_demo_messages(fixtures_dir))
+    if not raw_messages:
+        _DEMO_RESPONSES = {}
+        raise RuntimeError(
+            f"{fixtures_dir}: no non-poison email fixtures found — nothing to demo."
+        )
+
+    # Pre-flight: every fixture must have a canned Summary. Detecting
+    # drift here means partial output cannot be written.
+    fixture_ids = {r.message_id for r in raw_messages}
+    missing = fixture_ids - _DEMO_RESPONSES.keys()
+    if missing:
+        _DEMO_RESPONSES = {}
+        raise DemoLookupError(
+            f"{_LLM_RESPONSES_FILENAME} missing canned Summary for "
+            f"message_ids={sorted(missing)}"
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    # Prune stale samples so a shrinking fixture set never leaves
+    # orphaned ``006_sample.json`` behind claiming to be current output.
+    for stale in output_dir.glob("*_sample.json"):
+        stale.unlink()
 
     # Deferred imports: everything that transitively touches ``crewai``
     # must load AFTER CREWAI_TELEMETRY_OPT_OUT is set (top of this file).
@@ -166,28 +226,41 @@ def run_demo_batch(
     # separate cleanup — for now, silence the type check narrowly.
     flow = MailIngestorFlow(reader=reader, model=model)  # type: ignore[arg-type]
 
-    with patch.object(NativeAnthropicLLM, "call", _demo_llm_call):
-        for index, raw in enumerate(raw_messages, start=1):
-            _DEMO_CURRENT_MESSAGE_ID = raw.message_id
-            try:
-                record = flow.kickoff(inputs={"message_id": raw.message_id})
-            finally:
-                _DEMO_CURRENT_MESSAGE_ID = None
-            # Freeze created_at so two back-to-back runs produce
-            # byte-identical output. ``model_copy`` respects
-            # ``frozen=True`` — it returns a new instance rather than
-            # mutating.
-            record = record.model_copy(update={"created_at": DEMO_CREATED_AT})
-            output_path = output_dir / f"{index:03d}_sample.json"
-            output_path.write_text(
-                record.model_dump_json(indent=2) + "\n",
-                encoding="utf-8",
-            )
-            logger.info(
-                "demo_written path=%s message_id=%s",
-                output_path,
-                record.source_message_id,
-            )
+    logger.info(
+        "demo_starting fixtures_dir=%s output_dir=%s fixture_count=%d",
+        fixtures_dir,
+        output_dir,
+        len(raw_messages),
+    )
+
+    try:
+        with patch.object(NativeAnthropicLLM, "call", _demo_llm_call):
+            for index, raw in enumerate(raw_messages, start=1):
+                _DEMO_CURRENT_MESSAGE_ID = raw.message_id
+                try:
+                    record = flow.kickoff(inputs={"message_id": raw.message_id})
+                finally:
+                    _DEMO_CURRENT_MESSAGE_ID = None
+                # Freeze created_at so two back-to-back runs produce
+                # byte-identical output. ``model_copy`` respects
+                # ``frozen=True`` — it returns a new instance rather than
+                # mutating.
+                record = record.model_copy(update={"created_at": DEMO_CREATED_AT})
+                output_path = output_dir / f"{index:03d}_sample.json"
+                output_path.write_text(
+                    record.model_dump_json(indent=2) + "\n",
+                    encoding="utf-8",
+                )
+                logger.info(
+                    "demo_written path=%s message_id=%s",
+                    output_path,
+                    record.source_message_id,
+                )
+    finally:
+        # Clear the module-level responses map so a subsequent in-process
+        # ``run_demo_batch`` cannot silently reuse the prior run's data
+        # (defense in depth — the next call also reassigns from disk).
+        _DEMO_RESPONSES = {}
 
     logger.info("demo_batch_complete count=%d output_dir=%s", len(raw_messages), output_dir)
     return 0

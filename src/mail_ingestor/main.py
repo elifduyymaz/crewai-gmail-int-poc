@@ -174,8 +174,21 @@ def _run_demo() -> int:
     ``ANTHROPIC_AUTH_TOKEN`` nor Gmail credentials. Logging is
     configured with the INFO defaults so the ``demo_written`` /
     ``demo_batch_complete`` lines are visible without extra flags.
+
+    The fixtures dir is resolved from the source tree via
+    ``_REPO_ROOT``. A wheel install would put the package in
+    ``site-packages/`` where the fixtures do not ship — surface that as
+    a clean stderr error instead of running an empty batch to exit 0.
     """
     _configure_logging("INFO")
+    if not _DEMO_FIXTURES_DIR.is_dir():
+        print(
+            f"[mail-ingestor] --demo fixtures directory not found: {_DEMO_FIXTURES_DIR}. "
+            "Are you running from an installed wheel? --demo needs the "
+            "in-repo fixtures under tests/fixtures/emails/.",
+            file=sys.stderr,
+        )
+        return _ERR_CONFIG
     from mail_ingestor.demo import run_demo_batch
 
     return run_demo_batch(_DEMO_FIXTURES_DIR, _DEMO_OUTPUT_DIR)

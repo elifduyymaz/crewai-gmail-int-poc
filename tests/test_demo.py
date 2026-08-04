@@ -129,8 +129,10 @@ def test_every_email_fixture_has_a_matching_llm_response() -> None:
 # ─────────────────────────────────────────────────────────────
 
 
-def test_demo_llm_call_raises_when_no_context_is_set() -> None:
-    demo_mod._DEMO_CURRENT_MESSAGE_ID = None
+def test_demo_llm_call_raises_when_no_context_is_set(monkeypatch) -> None:
+    # Use monkeypatch (not bare mutation) so a failing test does not leak
+    # module state into the next test under pytest-xdist / pytest-random.
+    monkeypatch.setattr(demo_mod, "_DEMO_CURRENT_MESSAGE_ID", None)
     with pytest.raises(RuntimeError, match="no _DEMO_CURRENT_MESSAGE_ID set"):
         demo_mod._demo_llm_call(object(), "prompt")
 
@@ -252,3 +254,145 @@ def test_run_demo_batch_does_not_require_anthropic_auth_token(
     output_dir = tmp_path / "demo_out"
     rc = run_demo_batch(_FIXTURES_DIR, output_dir)
     assert rc == 0
+
+
+# ─────────────────────────────────────────────────────────────
+# Adversarial review follow-ups (Task 5.3 review agents)
+# ─────────────────────────────────────────────────────────────
+
+
+def test_iter_demo_messages_error_carries_fixture_path_on_malformed_json(
+    tmp_path: Path,
+) -> None:
+    bad = tmp_path / "001_bad.json"
+    bad.write_text("{not valid json", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"001_bad\.json: invalid JSON"):
+        list(iter_demo_messages(tmp_path))
+
+
+def test_load_demo_llm_responses_error_carries_path_on_malformed_json(
+    tmp_path: Path,
+) -> None:
+    bad = tmp_path / "llm_responses.json"
+    bad.write_text("{oops", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"llm_responses\.json: invalid JSON"):
+        load_demo_llm_responses(bad)
+
+
+def test_run_demo_batch_rejects_missing_fixtures_dir(tmp_path: Path) -> None:
+    # Startup guard: don't quietly produce an empty batch when the caller
+    # points at nothing. Wheel-install / cwd-drift scenario.
+    missing = tmp_path / "does_not_exist"
+    with pytest.raises(FileNotFoundError, match="demo fixtures directory not found"):
+        run_demo_batch(missing, tmp_path / "out")
+
+
+def test_run_demo_batch_rejects_empty_fixtures_dir(tmp_path: Path) -> None:
+    # A directory with only llm_responses.json (no emails) or only
+    # poison_ fixtures would silently exit 0 — surface it loudly.
+    fixtures = tmp_path / "empty"
+    fixtures.mkdir()
+    (fixtures / "llm_responses.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="no non-poison email fixtures found"):
+        run_demo_batch(fixtures, tmp_path / "out")
+
+
+def test_run_demo_batch_rejects_fixture_missing_from_llm_responses(
+    tmp_path: Path,
+) -> None:
+    # Fixture-drift pre-flight: if a caller adds an email fixture but
+    # forgets to update llm_responses.json, catch it BEFORE any I/O so no
+    # partial demo/00N_sample.json files land on disk.
+    fixtures = tmp_path / "drift"
+    fixtures.mkdir()
+    (fixtures / "001_only.json").write_text(
+        '{"id": "orphan-msg-1", "payload": {"headers": []}, "internalDate": "1700000000000"}',
+        encoding="utf-8",
+    )
+    (fixtures / "llm_responses.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(DemoLookupError, match=r"missing canned Summary.*orphan-msg-1"):
+        run_demo_batch(fixtures, tmp_path / "out")
+
+    # Pre-flight fired BEFORE any I/O — nothing wrote to the output dir.
+    assert not (tmp_path / "out").exists() or not list((tmp_path / "out").glob("*.json"))
+
+
+def test_run_demo_batch_prunes_stale_output_samples(tmp_path: Path) -> None:
+    # A previous run left a 006_sample.json behind; the current fixture
+    # set only has 5 entries. The stale file must be gone after this run.
+    output_dir = tmp_path / "demo_out"
+    output_dir.mkdir()
+    stale = output_dir / "006_sample.json"
+    stale.write_text('{"stale": true}', encoding="utf-8")
+    assert stale.exists()
+
+    run_demo_batch(_FIXTURES_DIR, output_dir)
+
+    assert not stale.exists()
+    # And only the 5 fresh samples are present.
+    assert sorted(p.name for p in output_dir.glob("*_sample.json")) == [
+        "001_sample.json",
+        "002_sample.json",
+        "003_sample.json",
+        "004_sample.json",
+        "005_sample.json",
+    ]
+
+
+def test_run_demo_batch_clears_demo_responses_global_after_completion(
+    tmp_path: Path,
+) -> None:
+    # Silent-failure guard: after a successful run, the module-level
+    # responses map must be empty. Otherwise a subsequent call with a
+    # subset fixture set could ghost-lookup the previous run's data.
+    output_dir = tmp_path / "demo_out"
+    run_demo_batch(_FIXTURES_DIR, output_dir)
+    assert demo_mod._DEMO_RESPONSES == {}
+
+
+def test_run_demo_batch_clears_demo_responses_even_when_flow_raises(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # If flow.kickoff explodes mid-batch (e.g. Pydantic schema drift),
+    # the try/finally must still reset the global — otherwise the next
+    # in-process caller inherits stale data.
+    from mail_ingestor import flow as flow_mod
+
+    def _boom(self, inputs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("simulated flow failure")
+
+    monkeypatch.setattr(flow_mod.MailIngestorFlow, "kickoff", _boom)
+    output_dir = tmp_path / "demo_out"
+    with pytest.raises(RuntimeError, match="simulated flow failure"):
+        run_demo_batch(_FIXTURES_DIR, output_dir)
+    assert demo_mod._DEMO_RESPONSES == {}
+    assert demo_mod._DEMO_CURRENT_MESSAGE_ID is None
+
+
+def test_demo_reader_key_error_includes_demo_context() -> None:
+    # If a caller injects a stale message_id, the KeyError must say
+    # "demo reader" so the traceback doesn't look like a Gmail bug.
+    reader = demo_mod._DemoGmailReader({"real-1": {"payload": {}}})
+    with pytest.raises(KeyError, match=r"demo reader has no fixture.*'stale-999'"):
+        reader.get_message("stale-999")
+
+
+def test_committed_demo_samples_match_a_fresh_run(tmp_path: Path) -> None:
+    # AC #6 elevated: the artifact contributors merge (repo-committed
+    # demo/*.json) must equal what --demo would produce right now.
+    # Schema drift, model rename, or a llm_responses.json edit that
+    # someone forgot to regenerate against would leave the committed
+    # samples stale — this test fails until the artifacts are refreshed.
+    fresh_dir = tmp_path / "fresh"
+    run_demo_batch(_FIXTURES_DIR, fresh_dir)
+    committed_dir = _FIXTURES_DIR.parent.parent.parent / "demo"
+    for fresh in sorted(fresh_dir.glob("*_sample.json")):
+        committed = committed_dir / fresh.name
+        assert committed.exists(), (
+            f"committed sample missing: {committed.relative_to(_FIXTURES_DIR.parent.parent.parent)}"
+        )
+        assert fresh.read_bytes() == committed.read_bytes(), (
+            f"committed {committed.name} is stale; regenerate via "
+            f"`python -m mail_ingestor.main --demo` and commit the result."
+        )
