@@ -7,13 +7,27 @@ parsing into ``EmailMessage`` is a later task.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from googleapiclient.errors import HttpError
 
 
 class GmailReaderError(RuntimeError):
     """Raised when a Gmail messages API call fails."""
+
+
+@runtime_checkable
+class MessageReader(Protocol):
+    """Structural interface used by ``MailIngestorFlow.fetch``.
+
+    Any object with a matching ``get_message`` signature satisfies this
+    contract — the real :class:`GmailReaderService` in production, and
+    ``mail_ingestor.demo._DemoGmailReader`` in offline mode. The Protocol
+    lets the flow's type annotation stay narrow without forcing every
+    caller to inherit from :class:`GmailReaderService`.
+    """
+
+    def get_message(self, message_id: str) -> dict[str, Any]: ...
 
 
 class GmailReaderService:

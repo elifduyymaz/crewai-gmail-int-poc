@@ -1,0 +1,18 @@
+{
+  "id": "demo-msg-002",
+  "threadId": "demo-thread-002",
+  "labelIds": ["INBOX", "Label_poc_reports"],
+  "internalDate": "1700086400000",
+  "snippet": "Recap of today's sync: Q1 roadmap locked; CVE patched...",
+  "payload": {
+    "mimeType": "text/plain",
+    "headers": [
+      {"name": "From", "value": "ahmet.demir@example.com"},
+      {"name": "To", "value": "engineering@example.com"},
+      {"name": "Subject", "value": "Sync recap 2026-01-02"}
+    ],
+    "body": {
+      "data": "VGVhbSwKClJlY2FwIG9mIHRvZGF5J3Mgc3luYzoKLSBRMSByb2FkbWFwIGxvY2tlZDsgaW5nZXN0aW9uIHBpcGVsaW5lIGJsb2NrcyBmZWF0dXJlIGxhdW5jaAotIENWRS0yMDI1LTEyMzQgcGF0Y2hlZCBpbiBzdGFnaW5nLCBwcm9kIHJvbGxvdXQgVGh1cnNkYXkKLSBIaXJpbmc6IHR3byBiYWNrZW5kIG9wZW5pbmdzIHN0aWxsIHVuZmlsbGVkCgpOZXh0IHN5bmM6IFR1ZXNkYXkgMTBhbS4gQnJpbmcgeW91ciBQUiByZXZpZXcgcXVldWUuCgpSZWdhcmRzLApBaG1ldA=="
+    }
+  }
+}

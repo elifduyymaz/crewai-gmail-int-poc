@@ -1,0 +1,19 @@
+{
+  "source_message_id": "demo-msg-004",
+  "subject": "AI Weekly Issue 47",
+  "summary": {
+    "tl_dr": "AI Weekly #47 covers OpenAI o3 pricing, Claude Sonnet 4.6, and RAGAS benchmarks.",
+    "summary": "The 47th issue of AI Weekly highlights OpenAI's o3 pricing shifts, the release of Anthropic's Claude Sonnet 4.6, and new retrieval-augmented generation benchmarks under RAGAS. An unsubscribe link is available.",
+    "key_points": [
+      "OpenAI o3 pricing shifts",
+      "Anthropic Claude Sonnet 4.6 released",
+      "RAGAS benchmarks for RAG systems"
+    ],
+    "action_items": [],
+    "category": "newsletter"
+  },
+  "model": "claude-demo-offline",
+  "tokens_prompt": null,
+  "tokens_completion": null,
+  "created_at": "2026-01-01T00:00:00Z"
+}

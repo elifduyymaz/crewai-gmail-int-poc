@@ -1,0 +1,69 @@
+{
+  "demo-msg-001": {
+    "tl_dr": "Weekly sales up 20% WoW, support tickets down 25%, active users at 42k.",
+    "summary": "Sarah reports strong week-over-week performance: sales grew 20%, support ticket volume fell 25% after a deploy, and active users reached 42k. A detailed dashboard is available and Sarah asks for concerns by Friday.",
+    "key_points": [
+      "sales +20% WoW",
+      "support tickets -25% post-deploy",
+      "42k active users"
+    ],
+    "action_items": [
+      "Reply by Friday with any concerns"
+    ],
+    "category": "report"
+  },
+  "demo-msg-002": {
+    "tl_dr": "Sync recap: Q1 roadmap locked, CVE-2025-1234 patched, two backend roles open.",
+    "summary": "Ahmet's meeting recap notes that the Q1 roadmap is locked with the ingestion pipeline as a launch blocker, CVE-2025-1234 has been patched in staging with a Thursday production rollout planned, and two backend hires remain outstanding.",
+    "key_points": [
+      "Q1 roadmap locked, ingestion pipeline blocks feature launch",
+      "CVE-2025-1234 prod rollout Thursday",
+      "two backend openings unfilled"
+    ],
+    "action_items": [
+      "Attend Tuesday 10am sync with PR review queue"
+    ],
+    "category": "meeting"
+  },
+  "demo-msg-003": {
+    "tl_dr": "Invoice INV-2026-0187 due 2026-08-15 for 12,450 TRY (NET 30).",
+    "summary": "Vendor Ltd. issued invoice INV-2026-0187 for 12,450 TRY under NET 30 terms with a due date of 2026-08-15. Accounts payable should contact billing@vendor.example if the PO reference is missing.",
+    "key_points": [
+      "amount: 12,450 TRY",
+      "due date: 2026-08-15",
+      "terms: NET 30"
+    ],
+    "action_items": [
+      "Reply to accounts@vendor.example if PO reference is missing",
+      "Pay invoice by 2026-08-15"
+    ],
+    "category": "invoice"
+  },
+  "demo-msg-004": {
+    "tl_dr": "AI Weekly #47 covers OpenAI o3 pricing, Claude Sonnet 4.6, and RAGAS benchmarks.",
+    "summary": "The 47th issue of AI Weekly highlights OpenAI's o3 pricing shifts, the release of Anthropic's Claude Sonnet 4.6, and new retrieval-augmented generation benchmarks under RAGAS. An unsubscribe link is available.",
+    "key_points": [
+      "OpenAI o3 pricing shifts",
+      "Anthropic Claude Sonnet 4.6 released",
+      "RAGAS benchmarks for RAG systems"
+    ],
+    "action_items": [],
+    "category": "newsletter"
+  },
+  "demo-msg-005": {
+    "tl_dr": "Reminder: PoC handoff Monday with findings.md, demo/, and README deliverables.",
+    "summary": "Ali Murat reminds Elifdy that the PoC handoff lands on Monday. Deliverables required: findings.md with a green/yellow/red verdict, five sample SummaryRecords under demo/, and a README including a grep-audit block.",
+    "key_points": [
+      "handoff date: Monday",
+      "findings.md verdict required",
+      "5 sample SummaryRecords in demo/",
+      "README with grep-audit block"
+    ],
+    "action_items": [
+      "Finalize findings.md verdict",
+      "Populate demo/ with 5 SummaryRecords",
+      "Add grep-audit block to README"
+    ],
+    "category": "reminder"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "demo-msg-005",
+  "threadId": "demo-thread-005",
+  "labelIds": ["INBOX", "Label_poc_reports"],
+  "internalDate": "1700345600000",
+  "snippet": "Reminder: PoC handoff on Monday. Deliverables due...",
+  "payload": {
+    "mimeType": "text/plain",
+    "headers": [
+      {"name": "From", "value": "ali.murat@example.com"},
+      {"name": "To", "value": "elifdy@example.com"},
+      {"name": "Subject", "value": "PoC handoff reminder"}
+    ],
+    "body": {
+      "data": "UmVtaW5kZXI6IFBvQyBoYW5kb2ZmIG9uIE1vbmRheS4KCkRlbGl2ZXJhYmxlcyBkdWU6Ci0gZmluZGluZ3MubWQgdmVyZGljdCAoZ3JlZW4veWVsbG93L3JlZCkKLSA1IHNhbXBsZSBTdW1tYXJ5UmVjb3JkcyBpbiBkZW1vLwotIFJFQURNRSB3aXRoIGdyZXAtYXVkaXQgYmxvY2sKCkFsaSBNdXJhdA=="
+    }
+  }
+}

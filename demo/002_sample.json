@@ -1,0 +1,21 @@
+{
+  "source_message_id": "demo-msg-002",
+  "subject": "Sync recap 2026-01-02",
+  "summary": {
+    "tl_dr": "Sync recap: Q1 roadmap locked, CVE-2025-1234 patched, two backend roles open.",
+    "summary": "Ahmet's meeting recap notes that the Q1 roadmap is locked with the ingestion pipeline as a launch blocker, CVE-2025-1234 has been patched in staging with a Thursday production rollout planned, and two backend hires remain outstanding.",
+    "key_points": [
+      "Q1 roadmap locked, ingestion pipeline blocks feature launch",
+      "CVE-2025-1234 prod rollout Thursday",
+      "two backend openings unfilled"
+    ],
+    "action_items": [
+      "Attend Tuesday 10am sync with PR review queue"
+    ],
+    "category": "meeting"
+  },
+  "model": "claude-demo-offline",
+  "tokens_prompt": null,
+  "tokens_completion": null,
+  "created_at": "2026-01-01T00:00:00Z"
+}

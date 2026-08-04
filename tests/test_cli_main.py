@@ -95,11 +95,72 @@ def test_main_without_mode_prints_usage_and_returns_2(capsys) -> None:
     assert "required" in err.lower()
 
 
-def test_main_demo_returns_2_with_stub_message(capsys) -> None:
+def test_main_demo_dispatches_to_run_demo_and_returns_0(monkeypatch) -> None:
+    # Task 5.3: --demo goes through mail_ingestor.demo.run_demo_batch, not
+    # the stub message. Dispatch via `main` and assert the demo module's
+    # entry point ran with the canonical fixtures/output paths. Actual
+    # file-writing behavior is covered by test_demo.py.
+    from unittest.mock import MagicMock
+
+    fake_run = MagicMock(return_value=0)
+    monkeypatch.setattr("mail_ingestor.demo.run_demo_batch", fake_run)
     rc = main_mod.main(["--demo"])
-    assert rc == 2
+    assert rc == 0
+    fake_run.assert_called_once_with(
+        main_mod._DEMO_FIXTURES_DIR, main_mod._DEMO_OUTPUT_DIR
+    )
+
+
+def test_main_demo_does_not_require_anthropic_auth_token(monkeypatch) -> None:
+    # --demo path skips _bootstrap and therefore Settings.from_env — the
+    # missing token must not surface as a config error.
+    from unittest.mock import MagicMock
+
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    monkeypatch.setattr("mail_ingestor.demo.run_demo_batch", MagicMock(return_value=0))
+    assert main_mod.main(["--demo"]) == 0
+
+
+def test_main_demo_missing_fixtures_dir_returns_1_with_friendly_stderr(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    # Wheel-install / cwd-drift scenario: _DEMO_FIXTURES_DIR resolves to
+    # a path that does not exist. The CLI must surface it as a config
+    # error (stderr + exit 1) instead of running an empty batch to exit 0.
+    monkeypatch.setattr(main_mod, "_DEMO_FIXTURES_DIR", tmp_path / "nowhere")
+    rc = main_mod.main(["--demo"])
+    assert rc == 1
     err = capsys.readouterr().err
-    assert "5.3" in err or "demo" in err.lower()
+    assert "fixtures directory not found" in err.lower()
+    assert "nowhere" in err
+
+
+def test_main_demo_end_to_end_produces_expected_output(monkeypatch, tmp_path) -> None:
+    # Full-stack integration: argparse → _run_demo → run_demo_batch →
+    # CrewAI Flow → mocked LLM → SummaryRecord → file write. Previous
+    # dispatch test stubbed run_demo_batch so the real path was never
+    # exercised via main(). Only _DEMO_OUTPUT_DIR is monkeypatched to
+    # avoid clobbering the committed demo/ artifact.
+    from mail_ingestor.schemas import SummaryRecord
+
+    fresh_out = tmp_path / "demo_out"
+    monkeypatch.setattr(main_mod, "_DEMO_OUTPUT_DIR", fresh_out)
+
+    rc = main_mod.main(["--demo"])
+
+    assert rc == 0
+    samples = sorted(fresh_out.glob("*_sample.json"))
+    assert [p.name for p in samples] == [
+        "001_sample.json",
+        "002_sample.json",
+        "003_sample.json",
+        "004_sample.json",
+        "005_sample.json",
+    ]
+    for sample in samples:
+        record = SummaryRecord.model_validate_json(sample.read_text(encoding="utf-8"))
+        assert record.source_message_id.startswith("demo-msg-")
+        assert record.model == "claude-demo-offline"
 
 
 # ─────────────────────────────────────────────────────────────
