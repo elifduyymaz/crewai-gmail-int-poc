@@ -1,0 +1,18 @@
+{
+  "id": "poison-charset-001",
+  "threadId": "poison-thread-001",
+  "labelIds": ["INBOX", "Label_poc_reports"],
+  "internalDate": "not-a-numeric-timestamp",
+  "snippet": "poison fixture: malformed internalDate trips int()",
+  "payload": {
+    "mimeType": "text/plain",
+    "headers": [
+      {"name": "From", "value": "poison-sender@example.com"},
+      {"name": "To", "value": "team@example.com"},
+      {"name": "Subject", "value": "Poison — bad timestamp"}
+    ],
+    "body": {
+      "data": "cG9pc29u"
+    }
+  }
+}
