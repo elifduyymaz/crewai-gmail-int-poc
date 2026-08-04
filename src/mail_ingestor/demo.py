@@ -191,49 +191,51 @@ def run_demo_batch(
             f"demo fixtures directory not found: {fixtures_dir}"
         )
 
-    _DEMO_RESPONSES = load_demo_llm_responses(fixtures_dir / _LLM_RESPONSES_FILENAME)
-    raw_messages = list(iter_demo_messages(fixtures_dir))
-    if not raw_messages:
-        _DEMO_RESPONSES = {}
-        raise RuntimeError(
-            f"{fixtures_dir}: no non-poison email fixtures found — nothing to demo."
-        )
-
-    # Pre-flight: every fixture must have a canned Summary. Detecting
-    # drift here means partial output cannot be written.
-    fixture_ids = {r.message_id for r in raw_messages}
-    missing = fixture_ids - _DEMO_RESPONSES.keys()
-    if missing:
-        _DEMO_RESPONSES = {}
-        raise DemoLookupError(
-            f"{_LLM_RESPONSES_FILENAME} missing canned Summary for "
-            f"message_ids={sorted(missing)}"
-        )
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    # Prune stale samples so a shrinking fixture set never leaves
-    # orphaned ``006_sample.json`` behind claiming to be current output.
-    for stale in output_dir.glob("*_sample.json"):
-        stale.unlink()
-
-    # Deferred imports: everything that transitively touches ``crewai``
-    # must load AFTER CREWAI_TELEMETRY_OPT_OUT is set (top of this file).
-    from mail_ingestor.flow import MailIngestorFlow, NativeAnthropicLLM
-
-    # ``_DemoGmailReader`` satisfies the structural ``MessageReader``
-    # Protocol declared in ``gmail/reader.py`` — mypy accepts it without
-    # a subclass relationship and no ``type: ignore`` is needed.
-    reader = _DemoGmailReader({r.message_id: r.payload for r in raw_messages})
-    flow = MailIngestorFlow(reader=reader, model=model)
-
-    logger.info(
-        "demo_starting fixtures_dir=%s output_dir=%s fixture_count=%d",
-        fixtures_dir,
-        output_dir,
-        len(raw_messages),
-    )
-
+    # Single outer try/finally covers every path from "responses map is
+    # assigned" through the flow loop. Even if ``iter_demo_messages``
+    # raises mid-load (e.g. bad JSON in fixture 3), the finally still
+    # clears the module-level state — no partial-assignment leak.
     try:
+        _DEMO_RESPONSES = load_demo_llm_responses(fixtures_dir / _LLM_RESPONSES_FILENAME)
+        raw_messages = list(iter_demo_messages(fixtures_dir))
+        if not raw_messages:
+            raise RuntimeError(
+                f"{fixtures_dir}: no non-poison email fixtures found — nothing to demo."
+            )
+
+        # Pre-flight: every fixture must have a canned Summary. Detecting
+        # drift here means partial output cannot be written.
+        fixture_ids = {r.message_id for r in raw_messages}
+        missing = fixture_ids - _DEMO_RESPONSES.keys()
+        if missing:
+            raise DemoLookupError(
+                f"{_LLM_RESPONSES_FILENAME} missing canned Summary for "
+                f"message_ids={sorted(missing)}"
+            )
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        # Prune stale samples so a shrinking fixture set never leaves
+        # orphaned ``006_sample.json`` behind claiming to be current output.
+        for stale in output_dir.glob("*_sample.json"):
+            stale.unlink()
+
+        # Deferred imports: everything that transitively touches ``crewai``
+        # must load AFTER CREWAI_TELEMETRY_OPT_OUT is set (top of this file).
+        from mail_ingestor.flow import MailIngestorFlow, NativeAnthropicLLM
+
+        # ``_DemoGmailReader`` satisfies the structural ``MessageReader``
+        # Protocol declared in ``gmail/reader.py`` — mypy accepts it without
+        # a subclass relationship and no ``type: ignore`` is needed.
+        reader = _DemoGmailReader({r.message_id: r.payload for r in raw_messages})
+        flow = MailIngestorFlow(reader=reader, model=model)
+
+        logger.info(
+            "demo_starting fixtures_dir=%s output_dir=%s fixture_count=%d",
+            fixtures_dir,
+            output_dir,
+            len(raw_messages),
+        )
+
         with patch.object(NativeAnthropicLLM, "call", _demo_llm_call):
             for index, raw in enumerate(raw_messages, start=1):
                 _DEMO_CURRENT_MESSAGE_ID = raw.message_id

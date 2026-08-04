@@ -370,6 +370,32 @@ def test_run_demo_batch_clears_demo_responses_even_when_flow_raises(
     assert demo_mod._DEMO_CURRENT_MESSAGE_ID is None
 
 
+def test_run_demo_batch_clears_demo_responses_when_iter_raises_mid_load(
+    tmp_path: Path,
+) -> None:
+    # Pin the "responses map was assigned, but then iter_demo_messages
+    # raised on a bad fixture" path. Without the outer try/finally the
+    # module-level _DEMO_RESPONSES would leak the last valid load.
+    fixtures = tmp_path / "half_bad"
+    fixtures.mkdir()
+    # A valid llm_responses.json (so it loads) …
+    (fixtures / "llm_responses.json").write_text(
+        '{"real-1": {"tl_dr":"t","summary":"s","key_points":[],"action_items":[],"category":"c"}}',
+        encoding="utf-8",
+    )
+    # … followed by a fixture whose JSON is malformed. iter_demo_messages
+    # will raise ValueError from the JSON decoder wrap.
+    (fixtures / "001_broken.json").write_text("{not json", encoding="utf-8")
+
+    # Pre-seed the module global so we can prove the finally clears it.
+    demo_mod._DEMO_RESPONSES = {"stale-from-prior-run": {}}
+
+    with pytest.raises(ValueError, match=r"001_broken\.json: invalid JSON"):
+        run_demo_batch(fixtures, tmp_path / "out")
+
+    assert demo_mod._DEMO_RESPONSES == {}
+
+
 def test_demo_reader_key_error_includes_demo_context() -> None:
     # If a caller injects a stale message_id, the KeyError must say
     # "demo reader" so the traceback doesn't look like a Gmail bug.
