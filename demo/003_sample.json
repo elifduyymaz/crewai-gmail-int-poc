@@ -1,0 +1,22 @@
+{
+  "source_message_id": "demo-msg-003",
+  "subject": "Invoice INV-2026-0187 due 2026-08-15",
+  "summary": {
+    "tl_dr": "Invoice INV-2026-0187 due 2026-08-15 for 12,450 TRY (NET 30).",
+    "summary": "Vendor Ltd. issued invoice INV-2026-0187 for 12,450 TRY under NET 30 terms with a due date of 2026-08-15. Accounts payable should contact billing@vendor.example if the PO reference is missing.",
+    "key_points": [
+      "amount: 12,450 TRY",
+      "due date: 2026-08-15",
+      "terms: NET 30"
+    ],
+    "action_items": [
+      "Reply to accounts@vendor.example if PO reference is missing",
+      "Pay invoice by 2026-08-15"
+    ],
+    "category": "invoice"
+  },
+  "model": "claude-demo-offline",
+  "tokens_prompt": null,
+  "tokens_completion": null,
+  "created_at": "2026-01-01T00:00:00Z"
+}

@@ -29,6 +29,7 @@ import os
 import sqlite3
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # pragma: no cover - import only for type hints
@@ -41,6 +42,13 @@ _ERR_USAGE = 2
 # Canonical structured-log format for the root logger. Any change here
 # needs to update parsers or dashboards that consume the log stream.
 LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s %(message)s"
+
+# Default paths for ``--demo`` mode. The fixture set ships under
+# ``tests/fixtures/emails/`` per Task 5.3 AC #2; the demo run writes
+# committed JSON samples to ``demo/`` at the repo root per AC #5.
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_DEMO_FIXTURES_DIR = _REPO_ROOT / "tests" / "fixtures" / "emails"
+_DEMO_OUTPUT_DIR = _REPO_ROOT / "demo"
 
 
 def _positive_int(value: str) -> int:
@@ -157,6 +165,20 @@ def _run_auth() -> int:
         return _ERR_CONFIG
     print(f"[mail-ingestor] Gmail auth OK. Token saved to {config.token_path}.")
     return 0
+
+
+def _run_demo() -> int:
+    """Dispatch to the offline demo batch (see ``mail_ingestor.demo``).
+
+    ``--demo`` deliberately skips ``_bootstrap``: it needs neither
+    ``ANTHROPIC_AUTH_TOKEN`` nor Gmail credentials. Logging is
+    configured with the INFO defaults so the ``demo_written`` /
+    ``demo_batch_complete`` lines are visible without extra flags.
+    """
+    _configure_logging("INFO")
+    from mail_ingestor.demo import run_demo_batch
+
+    return run_demo_batch(_DEMO_FIXTURES_DIR, _DEMO_OUTPUT_DIR)
 
 
 def _build_gmail_client() -> Any:
@@ -360,11 +382,7 @@ def main(argv: list[str] | None = None) -> int:
         return _run_auth()
 
     if args.demo:
-        print(
-            "[mail-ingestor] --demo mode is Story 5.3 scope; not yet implemented.",
-            file=sys.stderr,
-        )
-        return _ERR_USAGE
+        return _run_demo()
 
     if not args.label:
         parser.print_usage(sys.stderr)

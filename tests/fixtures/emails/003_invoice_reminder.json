@@ -1,0 +1,18 @@
+{
+  "id": "demo-msg-003",
+  "threadId": "demo-thread-003",
+  "labelIds": ["INBOX", "Label_poc_reports"],
+  "internalDate": "1700172800000",
+  "snippet": "Invoice INV-2026-0187 attached. Total due: 12,450 TRY...",
+  "payload": {
+    "mimeType": "text/plain",
+    "headers": [
+      {"name": "From", "value": "billing@vendor.example"},
+      {"name": "To", "value": "accounts.payable@example.com"},
+      {"name": "Subject", "value": "Invoice INV-2026-0187 due 2026-08-15"}
+    ],
+    "body": {
+      "data": "SW52b2ljZSBJTlYtMjAyNi0wMTg3IGF0dGFjaGVkLgoKVG90YWwgZHVlOiAxMiw0NTAgVFJZCkR1ZSBkYXRlOiAyMDI2LTA4LTE1ClBheW1lbnQgdGVybXM6IE5FVCAzMAoKUmVwbHkgdG8gYWNjb3VudHNAdmVuZG9yLmV4YW1wbGUgaWYgdGhlIFBPIHJlZmVyZW5jZSBpcyBtaXNzaW5nLgoKVmVuZG9yIEx0ZC4="
+    }
+  }
+}

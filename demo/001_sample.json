@@ -1,0 +1,21 @@
+{
+  "source_message_id": "demo-msg-001",
+  "subject": "Weekly business update",
+  "summary": {
+    "tl_dr": "Weekly sales up 20% WoW, support tickets down 25%, active users at 42k.",
+    "summary": "Sarah reports strong week-over-week performance: sales grew 20%, support ticket volume fell 25% after a deploy, and active users reached 42k. A detailed dashboard is available and Sarah asks for concerns by Friday.",
+    "key_points": [
+      "sales +20% WoW",
+      "support tickets -25% post-deploy",
+      "42k active users"
+    ],
+    "action_items": [
+      "Reply by Friday with any concerns"
+    ],
+    "category": "report"
+  },
+  "model": "claude-demo-offline",
+  "tokens_prompt": null,
+  "tokens_completion": null,
+  "created_at": "2026-01-01T00:00:00Z"
+}

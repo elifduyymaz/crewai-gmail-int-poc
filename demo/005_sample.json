@@ -1,0 +1,24 @@
+{
+  "source_message_id": "demo-msg-005",
+  "subject": "PoC handoff reminder",
+  "summary": {
+    "tl_dr": "Reminder: PoC handoff Monday with findings.md, demo/, and README deliverables.",
+    "summary": "Ali Murat reminds Elifdy that the PoC handoff lands on Monday. Deliverables required: findings.md with a green/yellow/red verdict, five sample SummaryRecords under demo/, and a README including a grep-audit block.",
+    "key_points": [
+      "handoff date: Monday",
+      "findings.md verdict required",
+      "5 sample SummaryRecords in demo/",
+      "README with grep-audit block"
+    ],
+    "action_items": [
+      "Finalize findings.md verdict",
+      "Populate demo/ with 5 SummaryRecords",
+      "Add grep-audit block to README"
+    ],
+    "category": "reminder"
+  },
+  "model": "claude-demo-offline",
+  "tokens_prompt": null,
+  "tokens_completion": null,
+  "created_at": "2026-01-01T00:00:00Z"
+}

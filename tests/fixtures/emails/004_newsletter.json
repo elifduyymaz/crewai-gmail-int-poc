@@ -1,0 +1,18 @@
+{
+  "id": "demo-msg-004",
+  "threadId": "demo-thread-004",
+  "labelIds": ["INBOX", "Label_poc_reports"],
+  "internalDate": "1700259200000",
+  "snippet": "AI Weekly - Issue 47: OpenAI o3 pricing shifts, Anthropic Claude Sonnet 4.6...",
+  "payload": {
+    "mimeType": "text/plain",
+    "headers": [
+      {"name": "From", "value": "newsletter@ai-weekly.example"},
+      {"name": "To", "value": "subscribers@example.com"},
+      {"name": "Subject", "value": "AI Weekly Issue 47"}
+    ],
+    "body": {
+      "data": "QUkgV2Vla2x5IC0gSXNzdWUgNDcKCkZlYXR1cmVkIHRoaXMgd2VlazoKLSBPcGVuQUkgbzMgcHJpY2luZyBzaGlmdHMKLSBBbnRocm9waWMgQ2xhdWRlIFNvbm5ldCA0LjYgcmVsZWFzZWQKLSBSZXRyaWV2YWwtYXVnbWVudGVkIGdlbmVyYXRpb24gYmVuY2htYXJrcyAoUkFHQVMpCgpVbnN1YnNjcmliZTogaHR0cHM6Ly9uZXdzbGV0dGVyLmV4YW1wbGUvdW5zdWJzY3JpYmU="
+    }
+  }
+}

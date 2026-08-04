@@ -1,0 +1,14 @@
+{
+  "id": "poison-msg-001",
+  "threadId": "poison-thread-001",
+  "labelIds": ["INBOX"],
+  "internalDate": "1700432000000",
+  "snippet": "",
+  "payload": {
+    "mimeType": "text/plain",
+    "headers": [],
+    "body": {
+      "data": ""
+    }
+  }
+}

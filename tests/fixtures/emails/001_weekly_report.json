@@ -1,0 +1,18 @@
+{
+  "id": "demo-msg-001",
+  "threadId": "demo-thread-001",
+  "labelIds": ["INBOX", "Label_poc_reports"],
+  "internalDate": "1700000000000",
+  "snippet": "Sales are up 20% week-over-week and support tickets down 25%...",
+  "payload": {
+    "mimeType": "text/plain",
+    "headers": [
+      {"name": "From", "value": "sarah.jones@example.com"},
+      {"name": "To", "value": "team@example.com"},
+      {"name": "Subject", "value": "Weekly business update"}
+    ],
+    "body": {
+      "data": "SGkgdGVhbSwKClNhbGVzIGFyZSB1cCAyMCUgd2Vlay1vdmVyLXdlZWsgYW5kIHN1cHBvcnQgdGlja2V0cyBkb3duIDI1JSBhZnRlciB0aGUgZGVwbG95LiBBY3RpdmUgdXNlcnMgY2xpbWJlZCB0byA0MmsuCgpEZXRhaWxlZCBkYXNoYm9hcmQ6IGh0dHBzOi8vaW50ZXJuYWwuZXhhbXBsZS5jb20vZGFzaGJvYXJkClBsZWFzZSByZXBseSBieSBGcmlkYXkgd2l0aCBhbnkgY29uY2VybnMuCgpCZXN0LApTYXJhaA=="
+    }
+  }
+}
