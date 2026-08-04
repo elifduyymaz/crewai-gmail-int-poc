@@ -59,11 +59,35 @@ def _canned_record(message_id: str) -> SummaryRecord:
 
 
 @pytest.fixture
-def _hermetic_env(monkeypatch):
-    """Guarantee the batch runs against a controlled env (no .env leak)."""
-    monkeypatch.setattr("dotenv.load_dotenv", lambda *a, **k: False)
+def _stubbed_env(monkeypatch):
+    """Stub the env so the batch runs against a controlled, hermetic view.
+
+    * ``dotenv.load_dotenv`` is patched to a MagicMock. On teardown the
+      fixture asserts the patched function was actually invoked — a
+      refactor that changed the import site (e.g., ``import dotenv;
+      dotenv.load_dotenv()``) would silently bypass the monkeypatch and
+      load a real ``.env``. The post-hoc assertion turns that into a
+      loud test failure.
+    * ``ANTHROPIC_AUTH_TOKEN`` is set to a placeholder so ``Settings``
+      passes validation without a real credential.
+    * ``SQLITE_DB_PATH`` is deleted so no ambient env vars affect the
+      in-memory SQLite the tests wire up.
+
+    Note: this is a *stub* fixture, not runtime hermeticity enforcement.
+    A test that opened a real network socket would still hit real
+    infrastructure. That's a PoC-scope limitation — Story 5.6 may add
+    a session-level ``socket.socket`` guard.
+    """
+    fake_load = MagicMock(return_value=False)
+    monkeypatch.setattr("dotenv.load_dotenv", fake_load)
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "tok-test")
     monkeypatch.delenv("SQLITE_DB_PATH", raising=False)
+    yield
+    assert fake_load.called, (
+        "dotenv.load_dotenv was never invoked during the test — a refactor "
+        "may have moved the import site and the stub no longer guarantees "
+        "hermetic env. Update this fixture to patch the new site."
+    )
 
 
 def _wire_batch(monkeypatch, tmp_path, *, ids: list[str], kickoff_side_effect):
@@ -99,7 +123,7 @@ def _wire_batch(monkeypatch, tmp_path, *, ids: list[str], kickoff_side_effect):
 
 
 def test_dlq_isolation_poison_lands_in_dlq_and_batch_continues(
-    _hermetic_env, monkeypatch, tmp_path, capsys
+    _stubbed_env, monkeypatch, tmp_path, capsys
 ) -> None:
     """Task 5.4 AC #2 core case: 3-message batch with one poison in the
     middle → 2 rows in summary_records, 1 row in dead_letters, exit 0.
@@ -163,7 +187,7 @@ def test_dlq_isolation_poison_charset_fixture_actually_raises_on_parse() -> None
 
 
 def test_dlq_isolation_all_poison_batch_still_returns_0(
-    _hermetic_env, monkeypatch, tmp_path, capsys
+    _stubbed_env, monkeypatch, tmp_path, capsys
 ) -> None:
     """Contract: even if every message DLQs, exit code is 0 as long as
     the CLI reaches its final line. No successful JSON on stdout.
@@ -187,7 +211,7 @@ def test_dlq_isolation_all_poison_batch_still_returns_0(
 
 
 def test_dlq_isolation_end_to_end_real_parser_through_flow_to_dlq(
-    _hermetic_env, monkeypatch, capsys
+    _stubbed_env, monkeypatch, capsys
 ) -> None:
     """Compose parser + flow + DLQ boundary end-to-end.
 
@@ -266,7 +290,7 @@ def test_dlq_isolation_end_to_end_real_parser_through_flow_to_dlq(
 
 
 def test_dlq_isolation_run_totals_reports_dlq_count(
-    _hermetic_env, monkeypatch, tmp_path, caplog
+    _stubbed_env, monkeypatch, tmp_path, caplog
 ) -> None:
     """The batch-end run_totals line must reflect the split accurately —
     ``messages_processed=N`` counts only successes, ``messages_dlq=M``

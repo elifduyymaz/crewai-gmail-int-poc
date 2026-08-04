@@ -363,10 +363,19 @@ def _run_batch(settings: Settings, label: str, limit: int) -> int:
                     ProcessingStage.SUMMARIZE.value,
                     type(exc).__name__,
                 )
-            # ``logger.exception`` includes the traceback; the summary body
-            # is not part of the exception object (NFR-S3). Adding
+            # ``logger.exception`` includes the traceback. Adding
             # ``exc_type`` makes the line grep-friendly without waiting on
             # the traceback that follows.
+            #
+            # CALLER DISCIPLINE (NFR-S2): upstream code MUST NOT embed
+            # email body / subject / summary content in exception
+            # messages — the traceback ``logger.exception`` prints
+            # includes ``str(exc)``, so any body substring in the exc
+            # args ends up in the log stream. Not enforced at runtime;
+            # documented here and in ``dlq.py``'s module docstring.
+            # ``test_no_body_in_logs.py`` audits the *format string*
+            # (which carries no SummaryRecord placeholders) — it cannot
+            # audit exception-payload discipline.
             logger.exception(
                 "message_failed message_id=%s stage=%s exc_type=%s",
                 message_id,
