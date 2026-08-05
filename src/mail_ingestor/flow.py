@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 from mail_ingestor.gmail.parser import parse_gmail_message
 from mail_ingestor.gmail.reader import MessageReader
 from mail_ingestor.llm import get_llm_client
+from mail_ingestor.redaction import redact_email_message
 from mail_ingestor.schemas import (
     EmailMessage,
     RawMessage,
@@ -389,6 +390,9 @@ class MailIngestorFlow(Flow[IngestState]):
         # sequential kickoffs on the same Flow instance. The instance is
         # reused for the length of one message; each `summarize` starts fresh.
         self._token_usage.reset()
+        # PII scrub (input-side): the LLM never sees raw PII, and the
+        # persisted SummaryRecord's subject is scrubbed too. EFSP-348.
+        parsed = redact_email_message(parsed)
         agent = build_summarizer_agent(self._model, usage_sink=self._token_usage)
         task = build_summarize_task(agent, parsed)
         crew = Crew(

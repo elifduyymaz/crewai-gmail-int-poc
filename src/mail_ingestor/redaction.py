@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 
+from mail_ingestor.schemas import EmailMessage
+
 EMAIL_PLACEHOLDER = "[REDACTED_EMAIL]"
 
 # Pragmatic email matcher (stub-grade — not full RFC 5322).
@@ -26,3 +28,19 @@ def redact(text: str) -> str:
     for pattern, replacement in _PATTERNS:
         text = pattern.sub(replacement, text)
     return text
+
+
+def redact_email_message(message: EmailMessage) -> EmailMessage:
+    """Return a copy of ``message`` with PII scrubbed from the fields that
+    feed the summarizer prompt: ``subject``, ``sender``, and ``body_text``.
+
+    ``message_id`` and other fields are left intact. The model is frozen, so
+    this returns a new instance via ``model_copy`` rather than mutating.
+    """
+    return message.model_copy(
+        update={
+            "subject": redact(message.subject),
+            "sender": redact(message.sender),
+            "body_text": redact(message.body_text),
+        }
+    )
