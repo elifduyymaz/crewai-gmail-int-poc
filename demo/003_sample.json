@@ -1,23 +1,22 @@
 {
-  "source_message_id": "19fd624c8ea9e064",
-  "subject": "AI & The Future Magazine - September 2026 Issue Out Now! 📰",
+  "source_message_id": "demo-msg-003",
+  "subject": "Invoice INV-2026-0187 due 2026-08-15",
   "summary": {
-    "tl_dr": "The September 2026 issue of AI & The Future Magazine is now available for subscribers to read in their digital library.",
-    "summary": "[REDACTED_NAME] announces the release of the September 2026 issue of AI & The Future Magazine. The issue features three main pieces: a cover story on agentic workflows and LLM architectures, an interview on AI ethics and legal landscape shifts, and a review of the top 10 open-source AI models of 2026. Subscribers can log into their accounts to access the magazine immediately.",
+    "tl_dr": "Invoice INV-2026-0187 due 2026-08-15 for 12,450 TRY (NET 30).",
+    "summary": "Vendor Ltd. issued invoice INV-2026-0187 for 12,450 TRY under NET 30 terms with a due date of 2026-08-15. Accounts payable should contact billing@vendor.example if the PO reference is missing.",
     "key_points": [
-      "September 2026 issue of AI & The Future Magazine is now available",
-      "Cover story focuses on agentic workflows and LLM architectures",
-      "Interview covers AI ethics and the shifting legal landscape",
-      "Review includes the top 10 open-source AI models of 2026",
-      "Content is accessible to digital library subscribers"
+      "amount: 12,450 TRY",
+      "due date: 2026-08-15",
+      "terms: NET 30"
     ],
     "action_items": [
-      "Log in to subscriber account to read the new issue"
+      "Reply to accounts@vendor.example if PO reference is missing",
+      "Pay invoice by 2026-08-15"
     ],
-    "category": "magazine"
+    "category": "invoice"
   },
-  "model": "claude-haiku-4-5-20251001",
-  "tokens_prompt": 806,
-  "tokens_completion": 264,
-  "created_at": "2026-08-06T08:58:26.575618Z"
+  "model": "claude-demo-offline",
+  "tokens_prompt": null,
+  "tokens_completion": null,
+  "created_at": "2026-01-01T00:00:00Z"
 }

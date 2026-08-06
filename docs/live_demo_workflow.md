@@ -1,8 +1,14 @@
 # Live-Run Demo Generation Workflow (Task 5.5)
 
-Steps to produce the committed `demo/00N_sample.json` deliverable for
-Ali Murat's Journey 1 review, from a live Gmail account through PII
+Steps to produce the committed `demo/live-run/00N_sample.json` deliverable
+for Ali Murat's Journey 1 review, from a live Gmail account through PII
 scrubbing to committed samples.
+
+> **Two-layer `demo/` layout.** `demo/*.json` holds the *offline* canned
+> samples that `--demo` regenerates deterministically (guarded by the
+> `test_committed_demo_samples_match_a_fresh_run` invariant). Live-run
+> evidence lives under `demo/live-run/*.json` so the two never overwrite
+> each other. This workflow writes to the `live-run/` subdirectory.
 
 ## Prerequisites (operator-side)
 
@@ -36,18 +42,18 @@ uv run python -m mail_ingestor.main \
     --label poc/reports --limit 5 \
     > run.log 2> run.err.log
 
-# 3. Extract → PII-scrub → commit as demo/00N_sample.json + SLO report.
+# 3. Extract → PII-scrub → commit as demo/live-run/00N_sample.json + SLO report.
 uv run python -m mail_ingestor.demo_capture \
     --run-log run.log \
     --err-log run.err.log \
-    --output-dir demo
+    --output-dir demo/live-run
 
-# 4. Hand-inspect each demo/*.json for stray PII that the regex didn't
-#    catch (rare names, unusual identifiers). Edit in place if needed.
+# 4. Hand-inspect each demo/live-run/*.json for stray PII that the regex
+#    didn't catch (rare names, unusual identifiers). Edit in place if needed.
 #    Re-running step 3 without re-running step 2 does NOT re-hit Anthropic.
 
 # 5. Commit the samples.
-git add demo/
+git add demo/live-run/
 git commit -m "chore(demo): live-run samples with PII scrub"
 ```
 
@@ -80,7 +86,7 @@ run still exits 0; DLQ'd rows will show up in `run_totals`.
 Copy the following into `findings.md` § deliverable notes when Story 5.6
 lands. Fill in the timing numbers and any hand-edit notes from your run:
 
-> The five committed `demo/00N_sample.json` samples were produced by a
+> The five committed `demo/live-run/00N_sample.json` samples were produced by a
 > live run against a test Gmail account, label `poc/reports`, on
 > `<DATE>`. Command: `python -m mail_ingestor.main --label poc/reports
 > --limit 5 > run.log 2> run.err.log`. Wall-clock timings from
