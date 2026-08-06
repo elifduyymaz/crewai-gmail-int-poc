@@ -30,3 +30,7 @@ docs/superpowers/
 
 # Local dev scripts (verification, ad-hoc probes) — not part of the product
 scripts/
+
+# Live-run scratch artifacts (unredacted content by design)
+run.log
+run.err.log

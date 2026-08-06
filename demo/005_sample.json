@@ -1,24 +1,23 @@
 {
-  "source_message_id": "demo-msg-005",
-  "subject": "PoC handoff reminder",
+  "source_message_id": "19fd623cd1d471a1",
+  "subject": "Update Regarding Your PhD Application",
   "summary": {
-    "tl_dr": "Reminder: PoC handoff Monday with findings.md, demo/, and README deliverables.",
-    "summary": "Ali Murat reminds Elifdy that the PoC handoff lands on Monday. Deliverables required: findings.md with a green/yellow/red verdict, five sample SummaryRecords under demo/, and a README including a grep-audit block.",
+    "tl_dr": "Your PhD application has been placed on the waitlist at rank #2 due to limited program capacity.",
+    "summary": "The applicant's PhD application was not accepted for direct admission due to limited program capacity and high volume of qualified candidates. The application has been placed on the waitlist at rank #2. The admissions board will contact the applicant before September 20, 2026 if a spot becomes available.",
     "key_points": [
-      "handoff date: Monday",
-      "findings.md verdict required",
-      "5 sample SummaryRecords in demo/",
-      "README with grep-audit block"
+      "Application placed on waitlist at rank #2",
+      "Limited program capacity cited as reason for non-admission",
+      "High volume of qualified candidates",
+      "Contact will be made before September 20, 2026 if spot opens up"
     ],
     "action_items": [
-      "Finalize findings.md verdict",
-      "Populate demo/ with 5 SummaryRecords",
-      "Add grep-audit block to README"
+      "Wait for contact from admissions board before September 20, 2026",
+      "Consider alternative PhD programs in the interim"
     ],
-    "category": "reminder"
+    "category": "education"
   },
-  "model": "claude-demo-offline",
-  "tokens_prompt": null,
-  "tokens_completion": null,
-  "created_at": "2026-01-01T00:00:00Z"
+  "model": "claude-haiku-4-5-20251001",
+  "tokens_prompt": 786,
+  "tokens_completion": 221,
+  "created_at": "2026-08-06T08:58:33.566301Z"
 }
