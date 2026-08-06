@@ -1,13 +1,13 @@
 ## Verdict: 🟡 YELLOW — proceed with CrewAI for the Ingestion Pipeline, contingent on four production must-adds (CVE patching + container sandbox, external idempotency claim, LLM-proxy cost cap, continued ownership of the custom GmailTool). No operational blocker fired at PoC scale; every gap is addressable at the platform boundary.
 
 ## What we did
-Built an end-to-end mail-ingestion PoC on CrewAI Flow: Gmail read via custom `BaseTool` wrappers (list-by-label + get-message), MIME parsed, PII scrubbed on both the input and the output side, summarised through Anthropic Claude (`claude-haiku-4-5-20251001`), and persisted to SQLite with `INSERT OR IGNORE` idempotency. The full pipeline was exercised against a controlled `poc/reports` Gmail label; five samples ship redacted under `demo/`.
+Built an end-to-end mail-ingestion PoC on CrewAI Flow: Gmail read via custom `BaseTool` wrappers (list-by-label + get-message), MIME parsed, PII scrubbed on both the input and the output side, summarised through Anthropic Claude (`claude-haiku-4-5-20251001`), and persisted to SQLite with `INSERT OR IGNORE` idempotency. The full pipeline was exercised against a controlled `poc/reports` Gmail label; five samples ship redacted under `demo/live-run/`.
 
 ## What worked / What surprised us / What we'd change
 | What worked | What surprised us | What we'd change |
 |---|---|---|
 | Flow orchestration ran end-to-end unattended on 5 messages, 0 DLQ, ~20 s wall-clock. | The summariser reproduces personal names verbatim from message bodies — output-side regex scrubbing does not catch them (needed to hand-redact two spans before commit). | Move the idempotency claim outside the tool boundary (external Redis / Postgres) instead of relying only on DB-layer `INSERT OR IGNORE`. |
-| Two-layer PII scrub (input + output) held across the 5-message sample; zero `@`-shaped addresses reached `demo/`. DLQ isolation is unit-test-covered but was not exercised live (0 DLQ this run). | CrewAI's Rich console pollutes stdout; a `line.startswith("{")` filter in `demo_capture` was needed to recover clean JSON. | Add a named-entity redaction pass at the output layer so hand-redaction is no longer required. |
+| Two-layer PII scrub (input + output) held across the 5-message sample; zero `@`-shaped addresses reached `demo/live-run/`. DLQ isolation is unit-test-covered but was not exercised live (0 DLQ this run). | CrewAI's Rich console pollutes stdout; a `line.startswith("{")` filter in `demo_capture` was needed to recover clean JSON. | Add a named-entity redaction pass at the output layer so hand-redaction is no longer required. |
 | Idempotency envelope (`INSERT OR IGNORE` on `message_id`) is in place and did not trigger — the batch produced 5 unique writes, as expected. | Prompt size averaged ~790 tokens per message on short-form email — MIME/HTML markup carries more weight than expected, so production summarisation should strip HTML upstream to cut cost. | Wire the LLM proxy (`litellm-proxy` with per-project daily spend cap) from day one, not as a later hardening step. |
 
 ## 4-gap observations
@@ -28,10 +28,10 @@ Built an end-to-end mail-ingestion PoC on CrewAI Flow: Gmail read via custom `Ba
 **Alternative frameworks:** revisit only if (a) the CVE cadence proves unsustainable, or (b) the external-claim envelope grows into a wearing operational cost. Both are addressable inside CrewAI today, so no immediate switch is warranted.
 
 ## How the demo was produced
-Five messages in a single controlled Gmail account, all tagged with the `poc/reports` label — high-volume inboxes, mixed labels, and multi-tenant scale are explicitly out of scope for this PoC. `uv run python -m mail_ingestor.main --label poc/reports --limit 5` ran the flow end-to-end, emitting structured JSON on stdout and telemetry on stderr. `uv run python -m mail_ingestor.demo_capture` aggregated the run, applied the output-side PII scrub, and wrote `demo/001–005_sample.json`. Two spans that the summariser reproduced from message bodies — one sender name, one institution name — were hand-redacted with `[REDACTED_NAME]` / `[REDACTED_INSTITUTION]` before commit; automating this is a follow-up on the output-side scrubber. Full reproduction steps are in `docs/live_demo_workflow.md`.
+Five messages in a single controlled Gmail account, all tagged with the `poc/reports` label — high-volume inboxes, mixed labels, and multi-tenant scale are explicitly out of scope for this PoC. `uv run python -m mail_ingestor.main --label poc/reports --limit 5` ran the flow end-to-end, emitting structured JSON on stdout and telemetry on stderr. `uv run python -m mail_ingestor.demo_capture --output-dir demo/live-run` aggregated the run, applied the output-side PII scrub, and wrote `demo/live-run/001–005_sample.json`. Two spans that the summariser reproduced from message bodies — one sender name, one institution name — were hand-redacted with `[REDACTED_NAME]` / `[REDACTED_INSTITUTION]` before commit; automating this is a follow-up on the output-side scrubber. Full reproduction steps are in `docs/live_demo_workflow.md`.
 
 ## References
-- [`demo/`](demo/) — five redacted live-run samples
+- [`demo/live-run/`](demo/live-run/) — five redacted live-run samples · [`demo/`](demo/) — five offline canned samples (`--demo` output)
 - [`docs/live_demo_workflow.md`](docs/live_demo_workflow.md) — reproduction steps for the demo
 - [`../base-docs/technical-crewai-gmail-integration-poc-research-2026-07-07.md`](../base-docs/technical-crewai-gmail-integration-poc-research-2026-07-07.md) — full research, incl. Chapter 8 recommendations
 - [`../base-docs/architecture.md`](../base-docs/architecture.md) — § Decision-support artifact discipline (line 83)

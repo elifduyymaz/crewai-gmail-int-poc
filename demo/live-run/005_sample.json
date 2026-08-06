@@ -1,0 +1,23 @@
+{
+  "source_message_id": "19fd623cd1d471a1",
+  "subject": "Update Regarding Your PhD Application",
+  "summary": {
+    "tl_dr": "Your PhD application has been placed on the waitlist at rank #2 due to limited program capacity.",
+    "summary": "The applicant's PhD application was not accepted for direct admission due to limited program capacity and high volume of qualified candidates. The application has been placed on the waitlist at rank #2. The admissions board will contact the applicant before September 20, 2026 if a spot becomes available.",
+    "key_points": [
+      "Application placed on waitlist at rank #2",
+      "Limited program capacity cited as reason for non-admission",
+      "High volume of qualified candidates",
+      "Contact will be made before September 20, 2026 if spot opens up"
+    ],
+    "action_items": [
+      "Wait for contact from admissions board before September 20, 2026",
+      "Consider alternative PhD programs in the interim"
+    ],
+    "category": "education"
+  },
+  "model": "claude-haiku-4-5-20251001",
+  "tokens_prompt": 786,
+  "tokens_completion": 221,
+  "created_at": "2026-08-06T08:58:33.566301Z"
+}

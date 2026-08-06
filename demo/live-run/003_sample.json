@@ -1,0 +1,23 @@
+{
+  "source_message_id": "19fd624c8ea9e064",
+  "subject": "AI & The Future Magazine - September 2026 Issue Out Now! 📰",
+  "summary": {
+    "tl_dr": "The September 2026 issue of AI & The Future Magazine is now available for subscribers to read in their digital library.",
+    "summary": "[REDACTED_NAME] announces the release of the September 2026 issue of AI & The Future Magazine. The issue features three main pieces: a cover story on agentic workflows and LLM architectures, an interview on AI ethics and legal landscape shifts, and a review of the top 10 open-source AI models of 2026. Subscribers can log into their accounts to access the magazine immediately.",
+    "key_points": [
+      "September 2026 issue of AI & The Future Magazine is now available",
+      "Cover story focuses on agentic workflows and LLM architectures",
+      "Interview covers AI ethics and the shifting legal landscape",
+      "Review includes the top 10 open-source AI models of 2026",
+      "Content is accessible to digital library subscribers"
+    ],
+    "action_items": [
+      "Log in to subscriber account to read the new issue"
+    ],
+    "category": "magazine"
+  },
+  "model": "claude-haiku-4-5-20251001",
+  "tokens_prompt": 806,
+  "tokens_completion": 264,
+  "created_at": "2026-08-06T08:58:26.575618Z"
+}
