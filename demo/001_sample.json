@@ -1,21 +1,22 @@
 {
-  "source_message_id": "demo-msg-001",
-  "subject": "Weekly business update",
+  "source_message_id": "19fd6310e755509d",
+  "subject": "计算机工程博士申请状态",
   "summary": {
-    "tl_dr": "Weekly sales up 20% WoW, support tickets down 25%, active users at 42k.",
-    "summary": "Sarah reports strong week-over-week performance: sales grew 20%, support ticket volume fell 25% after a deploy, and active users reached 42k. A detailed dashboard is available and Sarah asks for concerns by Friday.",
+    "tl_dr": "[REDACTED_NAME] has been accepted to the Computer Engineering PhD program at [REDACTED_INSTITUTION] with a full Graduate Research Assistantship.",
+    "summary": "The Graduate Admissions Committee of [REDACTED_INSTITUTION] is pleased to inform [REDACTED_NAME] of her formal acceptance to the Computer Engineering doctoral program. In addition to acceptance, she has been awarded a 100% Graduate Research Assistantship. To confirm acceptance and initiate final registration, she must submit her decision through the application system by September 15, 2026.",
     "key_points": [
-      "sales +20% WoW",
-      "support tickets -25% post-deploy",
-      "42k active users"
+      "Formal acceptance to [REDACTED_INSTITUTION]'s Computer Engineering PhD program",
+      "100% Graduate Research Assistantship award",
+      "Decision confirmation deadline: September 15, 2026",
+      "Submission required through application system"
     ],
     "action_items": [
-      "Reply by Friday with any concerns"
+      "Submit acceptance decision through the application system by September 15, 2026"
     ],
-    "category": "report"
+    "category": "admission"
   },
-  "model": "claude-demo-offline",
-  "tokens_prompt": null,
-  "tokens_completion": null,
-  "created_at": "2026-01-01T00:00:00Z"
+  "model": "claude-haiku-4-5-20251001",
+  "tokens_prompt": 809,
+  "tokens_completion": 233,
+  "created_at": "2026-08-06T08:58:19.390505Z"
 }
