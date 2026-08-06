@@ -44,7 +44,7 @@ uv sync
 uv run mail-ingestor --demo
 ```
 
-On a fresh clone this completes in **well under a minute** (measured ~8 s after
+On a fresh clone this completes in **well under a minute** (measured ~4 s after
 `uv sync`), comfortably inside the ≤ 10-minute fresh-machine reproducibility
 target (NFR-M3). No network, no keys.
 
@@ -127,31 +127,49 @@ only work a framework swap requires — estimated ~2 dev-days.
 This is a **PoC at PoC scale** (one controlled Gmail account, five
 `poc/reports`-labeled messages). The following are explicitly out of scope and
 deferred to a hardened production build (see [findings.md](findings.md) for the
-evidence behind each):
+evidence behind each). The list is the full PRD §PoC-Approach exclusion set,
+plus the four production must-adds surfaced by `findings.md`:
 
-- **Scale & multi-tenancy** — high-volume inboxes, mixed-label routing, and
-  multi-tenant operation are not addressed.
+- **Real bank mailbox access** — the PoC targets a controlled test Gmail
+  account; integration with a real bank mailbox (and the compliance envelope
+  that comes with it) is production-scope.
+- **Scale & multi-tenancy** — high-volume inboxes and multi-tenant operation
+  are not addressed. Related: **multi-label parallel processing** — the
+  pipeline processes a single label per invocation; parallel/fanned-out
+  multi-label ingestion is out of scope.
 - **CVE patching, container sandbox, prompt-injection defense** — the PoC ran
-  on an isolated dev machine; production must pin a patched CrewAI release, add
-  `pip-audit` in CI, containerize, and add an injection-defense layer.
+  on an isolated dev machine; production must pin a patched CrewAI release,
+  add `pip-audit` in CI, and add an injection-defense layer before untrusted
+  body content reaches the summarizer.
+- **Docker container, Kubernetes deployment, CronJob scheduling** — the PoC
+  runs as a single-shot local CLI; container packaging, Kubernetes deployment,
+  and scheduled invocation are production-scope.
+- **Comprehensive PII/PCI redaction** — `redaction.py` masks email addresses
+  only (a stub). Named entities (person/institution names) reproduced by the
+  summarizer were **hand-redacted** in the demo; automated named-entity
+  scrubbing is production-scope.
 - **External idempotency claim** — only DB-layer `INSERT OR IGNORE` on
   `message_id` is in place; a Redis/Postgres claim around side-effecting tool
   calls is production-scope.
 - **LLM cost governance** — no native cost cap, dollar limit, or circuit
   breaker; production must front the model with an LLM proxy (e.g.
   `litellm-proxy`) enforcing a per-project daily spend limit.
-- **Comprehensive PII/PCI redaction** — `redaction.py` masks email addresses
-  only (a stub). Named entities (person/institution names) reproduced by the
-  summarizer were **hand-redacted** in the demo; automated named-entity
-  scrubbing is production-scope.
 - **Real-time delivery** — Gmail Pub/Sub push + Workload Identity Federation
   is out of scope; ingestion is pull-based (batch by label).
 - **Service Account + Domain-Wide Delegation** — the PoC uses the installed-app
   OAuth flow, not org-wide SA/DWD provisioning.
+- **Postgres / pgvector persistence** — the PoC ships SQLite for both the
+  summary vault and the DLQ; Postgres and pgvector-backed vector stores are
+  production-scope.
 - **KMS-managed secrets** — credentials live in gitignored local files, not a
   managed key store.
-- **Production observability** — no Phoenix/Arize tracing; telemetry is stderr
-  logging only.
+- **Audit logging** — no security-audit trail is emitted; telemetry is stderr
+  logging only, without audit-grade retention.
+- **Production observability** — no Phoenix/Arize tracing, no OpenTelemetry
+  integration; structured observability platforms are deferred.
+- **CI pipeline (GitHub Actions)** — the PoC's quality gate is local `pytest`,
+  `ruff`, and `mypy --strict` via pre-commit; there is no CI workflow.
+  Production is expected to add one.
 - **Multi-framework benchmark** — this spike evaluates CrewAI against the
   requirements; it is not a head-to-head benchmark of LangGraph / Pydantic AI.
 
@@ -217,7 +235,8 @@ In-repo:
 
 - [findings.md](findings.md) — framework verdict, 4-gap evidence, recommendation
 - [docs/live_demo_workflow.md](docs/live_demo_workflow.md) — full demo reproduction steps
-- [demo/](demo/) — five redacted live-run samples
+- [demo/live-run/](demo/live-run/) — five redacted live-run samples (evidence for `findings.md`)
+- [demo/](demo/) — five offline canned samples (`--demo` output, deterministic)
 
 External (design docs live outside this repo, in the project's `base-docs/`
 set / Linear — not committed here): **architecture.md** (§ decision-support
