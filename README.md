@@ -238,10 +238,12 @@ In-repo:
 - [demo/live-run/](demo/live-run/) — five redacted live-run samples (evidence for `findings.md`)
 - [demo/](demo/) — five offline canned samples (`--demo` output, deterministic)
 
-External (design docs live outside this repo, in the project's `base-docs/`
-set / Linear — not committed here): **architecture.md** (§ decision-support
-artifact discipline), **prd.md** (FR29 findings format, FR31/FR32 import fence,
-FR33 decision-enablement, NFR-M3 reproducibility), **task.md**,
-**sprint-plan.md**, and the **technical CrewAI–Gmail integration research**
-(`technical-crewai-gmail-integration-poc-research-2026-07-07`, incl. Chapter 8
-recommendations). `findings.md` links these at their `../base-docs/` paths.
+Design docs (companion artifacts one level up under `base-docs/`, tracked
+separately from the code repo — the same paths `findings.md` uses, so the
+two decision docs stay consistent):
+
+- [`../base-docs/architecture.md`](../base-docs/architecture.md) — § decision-support artifact discipline
+- [`../base-docs/prd.md`](../base-docs/prd.md) — FR29 findings format, FR31/FR32 import fence, FR33 decision-enablement, NFR-M3 reproducibility
+- [`../base-docs/task.md`](../base-docs/task.md) — task catalog
+- [`../base-docs/sprint-plan.md`](../base-docs/sprint-plan.md) — sprint sequencing
+- [`../base-docs/technical-crewai-gmail-integration-poc-research-2026-07-07.md`](../base-docs/technical-crewai-gmail-integration-poc-research-2026-07-07.md) — full research, incl. Chapter 8 recommendations
